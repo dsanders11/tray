@@ -69,6 +69,14 @@ public class PrintSocketClient {
         HID_CLOSE_STREAM("hid.closeStream", false, "use a USB device"),
         HID_RELEASE_DEVICE("hid.releaseDevice", false, "release a USB device"),
 
+        UVC_LIST_DEVICES("uvc.listDevices", true, "access UVC devices"),
+        UVC_LIST_CONTROLS("uvc.listControls", true, "access UVC devices"),
+        UVC_OPEN_DEVICE("uvc.openDevice", true, "open a UVC device"),
+        UVC_OPENED("uvc.isOpen", true, "check UVC device open status"),
+        UVC_CLOSE_DEVICE("uvc.closeDevice", true, "close a UVC device"),
+        UVC_GET_CONTROL("uvc.getControl", true, "get UVC control"),
+        UVC_SET_CONTROL("uvc.setControl", true, "set UVC control"),
+
         WEBSOCKET_GET_NETWORK_INFO("websocket.getNetworkInfo", true),
         GET_VERSION("getVersion", false),
 
@@ -263,6 +271,9 @@ public class PrintSocketClient {
         Short vendorId = UsbUtilities.hexToShort(params.optString("vendorId"));
         Short productId = UsbUtilities.hexToShort(params.optString("productId"));
 
+        // used in uvc calls
+        String serialNum = params.optString("serialNum");
+
 
         //call appropriate methods
         switch(call) {
@@ -324,6 +335,25 @@ public class PrintSocketClient {
             case USB_LIST_ENDPOINTS:
                 sendResult(session, UID, UsbUtilities.getInterfaceEndpointsJSON(vendorId, productId, UsbUtilities.hexToByte(params.getString("interface"))));
                 break;
+            case UVC_LIST_DEVICES:
+                sendResult(session, UID, UvcUtilities.getUvcDevicesJSON());
+                break;
+            case UVC_LIST_CONTROLS: {
+                Device device = connection.getDevice(vendorId, productId, serialNum);
+                if (device != null && device.isOpen()) {
+                    UvcDevice uvc = (UvcDevice) device;
+
+                    sendResult(session, UID, uvc.listControls());
+                } else {
+                    if (!serialNum.isEmpty()) {
+                        sendError(session, UID, String.format("UVC Device [v:%s p:%s s:%s] must be opened first.", params.opt("vendorId"), params.opt("productId"), serialNum));
+                    } else {
+                        sendError(session, UID, String.format("UVC Device [v:%s p:%s] must be opened first.", params.opt("vendorId"), params.opt("productId")));
+                    }
+                }
+                break;
+            }
+
             case HID_LIST_DEVICES:
                 if (SystemUtilities.isWindows()) {
                     sendResult(session, UID, PJHA_HidUtilities.getHidDevicesJSON());
@@ -354,7 +384,7 @@ public class PrintSocketClient {
 
             case USB_CLAIM_DEVICE:
             case HID_CLAIM_DEVICE: {
-                if (connection.getDevice(vendorId, productId) == null) {
+                if (connection.getDevice(vendorId, productId, null) == null) {
                     DeviceIO device;
                     if (call == Method.USB_CLAIM_DEVICE) {
                         device = new UsbIO(vendorId, productId, UsbUtilities.hexToByte(params.optString("interface")));
@@ -371,6 +401,7 @@ public class PrintSocketClient {
                     }
 
                     if (device.isOpen()) {
+                        connection.addDevice(vendorId, productId, null, device);
                         sendResult(session, UID, null);
                     } else {
                         sendError(session, UID, "Failed to open connection to device");
@@ -383,13 +414,14 @@ public class PrintSocketClient {
             }
             case USB_CLAIMED:
             case HID_CLAIMED: {
-                sendResult(session, UID, connection.getDevice(vendorId, productId) != null);
+                sendResult(session, UID, connection.getDevice(vendorId, productId, null) != null);
                 break;
             }
             case USB_SEND_DATA:
             case HID_SEND_DATA: {
-                DeviceIO usb = connection.getDevice(vendorId, productId);
-                if (usb != null) {
+                Device device = connection.getDevice(vendorId, productId, null);
+                if (device != null) {
+                    DeviceIO usb = (DeviceIO) device;
                     usb.sendData(StringUtils.getBytesUtf8(params.optString("data")), UsbUtilities.hexToByte(params.optString("endpoint")));
                     sendResult(session, UID, null);
                 } else {
@@ -400,8 +432,9 @@ public class PrintSocketClient {
             }
             case USB_READ_DATA:
             case HID_READ_DATA: {
-                DeviceIO usb = connection.getDevice(vendorId, productId);
-                if (usb != null) {
+                Device device = connection.getDevice(vendorId, productId, null);
+                if (device != null) {
+                    DeviceIO usb = (DeviceIO) device;
                     byte[] response = usb.readData(params.optInt("responseSize"), UsbUtilities.hexToByte(params.optString("endpoint")));
                     JSONArray hex = new JSONArray();
                     for(byte b : response) {
@@ -422,28 +455,111 @@ public class PrintSocketClient {
             }
             case USB_CLOSE_STREAM:
             case HID_CLOSE_STREAM: {
-                DeviceIO usb = connection.getDevice(vendorId, productId);
-                if (usb != null && usb.isStreaming()) {
-                    usb.setStreaming(false);
-                    sendResult(session, UID, null);
+                Device device = connection.getDevice(vendorId, productId, null);
+                if (device != null) {
+                    DeviceIO usb = (DeviceIO) device;
+                    if (usb.isStreaming()) {
+                        usb.setStreaming(false);
+                        sendResult(session, UID, null);
+                    } else {
+                        sendError(session, UID, String.format("USB Device [v:%s p:%s] is not streaming data.", params.opt("vendorId"), params.opt("productId")));
+                    }
                 } else {
-                    sendError(session, UID, String.format("USB Device [v:%s p:%s] is not streaming data.", params.opt("vendorId"), params.opt("productId")));
+                    sendError(session, UID, String.format("USB Device [v:%s p:%s] must be claimed first.", params.opt("vendorId"), params.opt("productId")));
                 }
 
                 break;
             }
             case USB_RELEASE_DEVICE:
             case HID_RELEASE_DEVICE: {
-                DeviceIO usb = connection.getDevice(vendorId, productId);
-                if (usb != null) {
-                    usb.close();
-                    connection.removeDevice(vendorId, productId);
+                Device device = connection.getDevice(vendorId, productId, null);
+                if (device != null) {
+                    device.close();
+                    connection.removeDevice(vendorId, productId, null);
 
                     sendResult(session, UID, null);
                 } else {
                     sendError(session, UID, String.format("USB Device [v:%s p:%s] is not claimed.", params.opt("vendorId"), params.opt("productId")));
                 }
 
+                break;
+            }
+
+            case UVC_OPEN_DEVICE: {
+                if (connection.getDevice(vendorId, productId, serialNum) == null) {
+                    Device device = new UvcDevice(vendorId, productId, serialNum);
+                    device.open();
+                    if (device.isOpen()) {
+                        connection.addDevice(vendorId, productId, serialNum, device);
+                        sendResult(session, UID, null);
+                    } else {
+                        sendError(session, UID, "Failed to open connection to device");
+                    }
+                } else {
+                    sendError(session, UID, String.format("UVC Device [v:%s p:%s s:%s] is already open.", params.opt("vendorId"), params.opt("productId"), params.opt("serialNum")));
+                }
+
+                break;
+            }
+
+            case UVC_CLOSE_DEVICE: {
+                Device device = connection.getDevice(vendorId, productId, serialNum);
+                if (device != null && device.isOpen()) {
+                    device.close();
+
+                    connection.removeDevice(vendorId, productId, serialNum);
+                    sendResult(session, UID, null);
+                } else {
+                    if (!serialNum.isEmpty()) {
+                        sendError(session, UID, String.format("UVC Device [v:%s p:%s s:%s] is not open.", params.opt("vendorId"), params.opt("productId"), serialNum));
+                    } else {
+                        sendError(session, UID, String.format("UVC Device [v:%s p:%s] is not open.", params.opt("vendorId"), params.opt("productId")));
+                    }
+                }
+                break;
+            }
+
+            case UVC_OPENED: {
+                Device device = connection.getDevice(vendorId, productId, serialNum);
+
+                if (device != null) {
+                    sendResult(session, UID, device.isOpen());
+                } else {
+                    sendResult(session, UID, false);
+                }
+                break;
+            }
+
+            case UVC_GET_CONTROL: {
+                Device device = connection.getDevice(vendorId, productId, serialNum);
+                if (device != null) {
+                    UvcDevice uvc = (UvcDevice) device;
+
+                    sendResult(session, UID, uvc.getControl(params.optString("control")));
+                } else {
+                    if (!serialNum.isEmpty()) {
+                        sendError(session, UID, String.format("UVC Device [v:%s p:%s s:%s] must be opened first.", params.opt("vendorId"), params.opt("productId"), serialNum));
+                    } else {
+                        sendError(session, UID, String.format("UVC Device [v:%s p:%s] must be opened first.", params.opt("vendorId"), params.opt("productId")));
+                    }
+                }
+                break;
+            }
+
+            case UVC_SET_CONTROL: {
+                Device device = connection.getDevice(vendorId, productId, serialNum);
+                if (device != null) {
+                    UvcDevice uvc = (UvcDevice) device;
+
+                    uvc.setControl(params.optString("control"), params.optString("value"));
+                    sendResult(session, UID, null);
+                } else {
+                    if (!serialNum.isEmpty()) {
+                        sendError(session, UID, String.format("UVC Device [v:%s p:%s s:%s] must be opened first.", params.opt("vendorId"), params.opt("productId"), serialNum));
+                    } else {
+                        sendError(session, UID, String.format("UVC Device [v:%s p:%s] must be opened first.", params.opt("vendorId"), params.opt("productId")));
+                    }
+                }
                 break;
             }
 

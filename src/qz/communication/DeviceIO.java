@@ -1,18 +1,6 @@
 package qz.communication;
 
-public interface DeviceIO {
-
-    String getVendorId();
-
-    String getProductId();
-
-
-    void open() throws DeviceException;
-
-    boolean isOpen();
-
-    void close() throws DeviceException;
-
+public interface DeviceIO extends Device {
 
     void setStreaming(boolean streaming);
 

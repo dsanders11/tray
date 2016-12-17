@@ -1177,6 +1177,144 @@ var qz = (function() {
 
 
         /**
+         * Calls related to interaction with UVC devices.
+         * @namespace qz.uvc
+         */
+        uvc: {
+            /**
+             * List of available UVC devices. Includes (hexadecimal) vendor ID, (hexadecimal) product ID and serial number.
+             *
+             * @returns {Promise<Array<Object>|Error>} Array of JSON objects containing information on connected UVC devices.
+             *
+             * @memberof qz.uvc
+             */
+            listDevices: function() {
+                return _qz.websocket.dataPromise('uvc.listDevices');
+            },
+
+            /**
+             * Open a UVC device to enable setting/reading device controls.
+             *
+             * @param vendorId Hex string of UVC device's vendor ID.
+             * @param productId Hex string of UVC device's product ID.
+             * @param serial String of serial number for the UVC device to open.
+             * @returns {Promise<null|Error>}
+             *
+             * @memberof qz.uvc
+             */
+            openDevice: function(vendorId, productId, serial) {
+                var params = {
+                    vendorId: vendorId,
+                    productId: productId,
+                    serialNum: serial
+                };
+                return _qz.websocket.dataPromise('uvc.openDevice', params);
+            },
+
+            /**
+             * Check if a UVC device is open.
+             *
+             * @param vendorId Hex string of UVC device's vendor ID.
+             * @param productId Hex string of UVC device's product ID.
+             * @param serial String of serial number for the UVC device to open.
+             * @returns {Promise<null|Error>}
+             *
+             * @memberof qz.uvc
+             */
+            isOpen: function(vendorId, productId, serial) {
+                var params = {
+                    vendorId: vendorId,
+                    productId: productId,
+                    serialNum: serial
+                };
+                return _qz.websocket.dataPromise('uvc.isOpen', params);
+            },
+
+            /**
+             * Close an open UVC device.
+             *
+             * @param vendorId Hex string of UVC device's vendor ID.
+             * @param productId Hex string of UVC device's product ID.
+             * @param serial String of serial number for the UVC device to open.
+             * @returns {Promise<null|Error>}
+             *
+             * @memberof qz.uvc
+             */
+            closeDevice: function(vendorId, productId, serial) {
+                var params = {
+                    vendorId: vendorId,
+                    productId: productId,
+                    serialNum: serial
+                };
+                return _qz.websocket.dataPromise('uvc.closeDevice', params);
+            },
+
+            /**
+             * List available controls for a UVC device.
+             *
+             * @param vendorId Hex string of UVC device's vendor ID.
+             * @param productId Hex string of UVC device's product ID.
+             * @param serial String of serial number for the UVC device to open.
+             * @returns {Promise<null|Error>}
+             *
+             * @memberof qz.uvc
+             */
+            listControls: function(vendorId, productId, serial) {
+                var params = {
+                    vendorId: vendorId,
+                    productId: productId,
+                    serialNum: serial
+                };
+                return _qz.websocket.dataPromise('uvc.listControls', params);
+            },
+
+            /**
+             * Get current control value on open UVC device.
+             *
+             * @param vendorId Hex string of UVC device's vendor ID.
+             * @param productId Hex string of UVC device's product ID.
+             * @param serial String of serial number for the UVC device to open.
+             * @param control String of control name to get current value for.
+             * @returns {Promise<null|Error>}
+             *
+             * @memberof qz.uvc
+             */
+            getControl: function(vendorId, productId, serial, control) {
+                var params = {
+                    vendorId: vendorId,
+                    productId: productId,
+                    serialNum: serial,
+                    control: control
+                };
+                return _qz.websocket.dataPromise('uvc.getControl', params);
+            },
+
+            /**
+             * Set control value on open UVC device.
+             *
+             * @param vendorId Hex string of UVC device's vendor ID.
+             * @param productId Hex string of UVC device's product ID.
+             * @param serial String of serial number for the UVC device to open.
+             * @param control String of control name to set value for.
+             * @param value String of control value.
+             * @returns {Promise<null|Error>}
+             *
+             * @memberof qz.uvc
+             */
+            setControl: function(vendorId, productId, serial, control, value) {
+                var params = {
+                    vendorId: vendorId,
+                    productId: productId,
+                    serialNum: serial,
+                    control: control,
+                    value: value
+                };
+                return _qz.websocket.dataPromise('uvc.setControl', params);
+            },
+        },
+
+
+        /**
          * Calls related to interaction with HID USB devices<br/>
          * Many of these calls can be accomplished from the <code>qz.usb</code> namespace,
          * but HID allows for simpler interaction
