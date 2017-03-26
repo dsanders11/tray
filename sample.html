@@ -108,6 +108,7 @@
                 <li id="serialTab" role="presentation"><a href="#serialContent" role="tab" data-toggle="tab">Serial</a></li>
                 <li id="usbTab" role="presentation"><a href="#usbContent" role="tab" data-toggle="tab">USB</a></li>
                 <li id="hidTab" role="presentation"><a href="#hidContent" role="tab" data-toggle="tab">HID</a></li>
+                <li id="dswcTab" role="presentation"><a href="#dswcContent" role="tab" data-toggle="tab">DSWC</a></li>
             </ul>
         </div>
 
@@ -706,6 +707,87 @@
                                 <div class="row">
                                     <div class="col-md-12">
                                         <button type="button" class="btn btn-danger pull-right" onclick="resetHidOptions();">Reset</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="dswcContent" class="tab-pane col-md-8">
+                <h3>DSWC</h3>
+                <hr />
+
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="form-group">
+                            <div class="btn-toolbar">
+                                <div class="btn-group">
+                                    <button type="button" class="btn btn-info" onclick="listDswcWebcams();">List Webcams</button>
+                                </div>
+                                <div class="btn-group">
+                                    <button type="button" class="btn btn-info" onclick="listDswcWebcamControls()">List Controls</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row" style="margin-top: 1em;">
+                    <div class="col-md-12">
+                        <div class="panel panel-default">
+                            <div class="panel-heading">
+                                <h4 class="panel-title">Options</h4>
+                            </div>
+
+                            <div class="panel-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-group form-inline">
+                                            <label for="dswcDevicePath">Device Path</label>
+                                            <input type="text" id="dswcDevicePath" class="form-control pull-right"/>
+                                        </div>
+                                    </div>
+                                </div>
+                                <hr />
+                                <div class="row">
+                                    <div class="col-md-12">
+                                        <button type="button" class="btn btn-danger pull-right" onclick="resetDswcOptions();">Reset</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row" style="margin-top: 1em;">
+                    <div class="col-md-12">
+                        <div class="panel panel-default">
+                            <div class="panel-heading">
+                                <h4 class="panel-title">Device Control</h4>
+                            </div>
+
+                            <div class="panel-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-group form-inline">
+                                            <label for="dswcControl">Control</label>
+                                            <input type="text" id="dswcControl" class="form-control pull-right" />
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-group form-inline">
+                                            <label for="dswcControlValue">Value</label>
+                                            <input type="text" id="dswcControlValue" class="form-control pull-right" />
+                                        </div>
+                                    </div>
+                                </div>
+                                <hr />
+                                <div class="row">
+                                    <div class="col-md-12">
+                                        <button type="button" class="btn btn-primary" onclick="getDswcControl();">Get</button>
+                                        <button type="button" class="btn btn-danger pull-right" onclick="setDswcControl();">Set</button>
                                     </div>
                                 </div>
                             </div>
@@ -1397,6 +1479,61 @@
     }
 
 
+    /// DSWC ///
+    function listDswcWebcams() {
+        qz.dswc.listWebcams().then(function(data) {
+            var list = '';
+            for(var i = 0; i < data.length; i++) {
+                var webcam = data[i];
+
+                list += "<p>" +
+                        "   Name: <code>" + webcam.name + "</code>" +
+                        dswcButton("dswcDevicePath", webcam.devicePath) + "<br/>" +
+                        "   Device Path: <code>" + webcam.devicePath + "</code><br/>";
+
+                if (webcam.description) { list += "   Description: <code>" + webcam.description + "</code><br/>"; }
+
+                list += "</p><hr/>";
+            }
+
+            pinMessage("<strong>Available DSWC webcams:</strong><br/>" + list);
+        }).catch(displayError);
+    }
+
+    function getDswcControl() {
+        qz.dswc.getControl($("#dswcDevicePath").val(), $("#dswcControl").val()).then(function(value) {
+            displayMessage("DSWC control value: " + value.value);
+        }).catch(displayError);
+    }
+
+    function setDswcControl() {
+        qz.dswc.setControl($("#dswcDevicePath").val(), $("#dswcControl").val(), $("#dswcControlValue").val()).then(function() {
+            displayMessage("DSWC control value set");
+        }).catch(displayError);
+    }
+
+    function listDswcWebcamControls() {
+        qz.dswc.listControls($("#dswcDevicePath").val()).then(function(data) {
+            var list = '';
+            for(var i = 0; i < data.length; i++) {
+                var control = data[i];
+
+                list += "<p>" + control.name + "<br/>" +
+                        dswcButton("dswcControl", control.name) + "<br/>" +
+                        "   Current: " + control.current + "<br/>" +
+                        "   Max: " + control.max + "<br/>" +
+                        "   Min: " + control.min + "<br/>" +
+                        "   Resolution: " + control.resolution + "<br/>" +
+                        "   Default: " + control.default + "<br/>";
+
+                list += "</p><hr/>";
+            }
+
+            pinMessage("<strong>Available DSWC controls:</strong><br/>" + list);
+        }).catch(displayError);
+    }
+
+
     /// Resets ///
     function resetRawOptions() {
         $("#rawPerSpool").val(1);
@@ -1693,6 +1830,11 @@
         for(var i = 0; i < serialPort.length; i++ ) {
             click += "$('#" + serialPort[i] + "').val('" + data[i] + "');$('#" + serialPort[i] + "').fadeOut(300).fadeIn(500);";
         }
+        return '<button class="btn btn-default btn-xs" onclick="' + click + '" data-dismiss="alert">Use This</button>';
+    }
+
+    function dswcButton(inputName, data) {
+        var click = `$('#${inputName}').val(String.raw\`${data}\`);`;
         return '<button class="btn btn-default btn-xs" onclick="' + click + '" data-dismiss="alert">Use This</button>';
     }
 

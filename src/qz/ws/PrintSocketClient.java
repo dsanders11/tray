@@ -17,6 +17,8 @@ import qz.communication.*;
 import qz.printer.PrintServiceMatcher;
 import qz.utils.*;
 
+import org.dswc.Webcam;
+
 import javax.print.PrintServiceLookup;
 import javax.security.cert.CertificateParsingException;
 import javax.usb.util.UsbUtil;
@@ -68,6 +70,11 @@ public class PrintSocketClient {
         HID_OPEN_STREAM("hid.openStream", true, "use a USB device"),
         HID_CLOSE_STREAM("hid.closeStream", false, "use a USB device"),
         HID_RELEASE_DEVICE("hid.releaseDevice", false, "release a USB device"),
+
+        DSWC_LIST_WEBCAMS("dswc.listWebcams", true, "access DSWC webcams"),
+        DSWC_LIST_CONTROLS("dswc.listControls", true, "access DSWC webcam"),
+        DSWC_GET_CONTROL("dswc.getControl", true, "get DSWC control"),
+        DSWC_SET_CONTROL("dswc.setControl", true, "set DSWC control"),
 
         WEBSOCKET_GET_NETWORK_INFO("websocket.getNetworkInfo", true),
         GET_VERSION("getVersion", false),
@@ -331,6 +338,19 @@ public class PrintSocketClient {
                     sendResult(session, UID, H4J_HidUtilities.getHidDevicesJSON());
                 }
                 break;
+            case DSWC_LIST_WEBCAMS:
+                sendResult(session, UID, DswcUtilities.getDswcWebcamsJSON());
+                break;
+            case DSWC_LIST_CONTROLS: {
+                Webcam webcam = DswcUtilities.getWebcam(params.getString("devicePath"));
+
+                if (webcam == null) {
+                    sendError(session, UID, "DSWC webcam not found");
+                } else {
+                    sendResult(session, UID, DswcUtilities.listDswcControls(webcam));
+                }
+                break;
+            }
             case HID_START_LISTENING:
                 if (!connection.isListening()) {
                     if (SystemUtilities.isWindows()) {
@@ -444,6 +464,51 @@ public class PrintSocketClient {
                     sendError(session, UID, String.format("USB Device [v:%s p:%s] is not claimed.", params.opt("vendorId"), params.opt("productId")));
                 }
 
+                break;
+            }
+
+            case DSWC_GET_CONTROL: {
+                Webcam webcam = DswcUtilities.getWebcam(params.getString("devicePath"));
+
+                if (webcam == null) {
+                    sendError(session, UID, "DSWC webcam not found");
+                } else {
+                    JSONObject controlJSON = new JSONObject();
+                    switch (params.getString("control")) {
+                        case "Zoom":
+                            controlJSON.put("value", webcam.GetZoom());
+                            sendResult(session, UID, controlJSON);
+                            break;
+                        case "Focus":
+                            controlJSON.put("value", webcam.GetFocus());
+                            sendResult(session, UID, controlJSON);
+                            break;
+                        default:
+                            sendError(session, UID, "Unknown or unsupported DSWC control");
+                            break;
+                    }
+                }
+                break;
+            }
+
+            case DSWC_SET_CONTROL: {
+                Webcam webcam = DswcUtilities.getWebcam(params.getString("devicePath"));
+
+                if (webcam == null) {
+                    sendError(session, UID, "DSWC webcam not found");
+                } else {
+                    int value = params.getInt("value");
+
+                    switch (params.getString("control")) {
+                        case "Zoom":
+                            webcam.SetZoom(value);
+                            break;
+                        case "Focus":
+                            webcam.SetFocus(value);
+                            break;
+                        default:
+                            sendError(session, UID, "Unknown or unsupported DSWC control");
+                }
                 break;
             }
 

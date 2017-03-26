@@ -1382,6 +1382,74 @@ var qz = (function() {
             }
         },
 
+        /**
+         * Calls related to interaction with DirectShow webcams.
+         * @namespace qz.dswc
+         */
+        dswc: {
+            /**
+             * List of available DirectShow webcams. Includes device name, optional description, and unique device path.
+             *
+             * @returns {Promise<Array<Object>|Error>} Array of JSON objects containing information on connected DirectShow webcams.
+             *
+             * @memberof qz.dswc
+             */
+            listWebcams: function() {
+                return _qz.websocket.dataPromise('dswc.listWebcams');
+            },
+
+            /**
+             * List available controls for a webcam.
+             *
+             * @param devicePath String of device path for DirectShow webcam.
+             * @returns {Promise<Array<Object>|Error>}
+             *
+             * @memberof qz.dswc
+             */
+            listControls: function(devicePath) {
+                var params = {
+                    devicePath: devicePath
+                };
+                return _qz.websocket.dataPromise('dswc.listControls', params);
+            },
+
+            /**
+             * Get current control value for a DirectShow webcam.
+             *
+             * @param devicePath String of device path for DirectShow webcam.
+             * @param control String of control name to get current value for.
+             * @returns {Promise<number|Error>}
+             *
+             * @memberof qz.dswc
+             */
+            getControl: function(devicePath, control) {
+                var params = {
+                    devicePath: devicePath,
+                    control: control
+                };
+                return _qz.websocket.dataPromise('dswc.getControl', params);
+            },
+
+            /**
+             * Set control value on DirectShow webcam.
+             *
+             * @param devicePath String of device path for DirectShow webcam.
+             * @param control String of control name to set value for.
+             * @param value String of control value.
+             * @returns {Promise<null|Error>}
+             *
+             * @memberof qz.dswc
+             */
+            setControl: function(devicePath, control, value) {
+                var params = {
+                    devicePath: devicePath,
+                    control: control,
+                    value: value
+                };
+                return _qz.websocket.dataPromise('dswc.setControl', params);
+            },
+        },
+
 
         /**
          * Calls related to signing connection requests.
