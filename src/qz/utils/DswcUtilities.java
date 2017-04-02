@@ -19,7 +19,7 @@ public class DswcUtilities {
 
     private static final Logger log = LoggerFactory.getLogger(DswcUtilities.class);
 
-    private static final Library dswcLibrary = new Library();
+    private static Library dswcLibrary = null;
 
     private static final HashMap<String,Webcam> webcamMap = new HashMap<>();
 
@@ -98,5 +98,12 @@ public class DswcUtilities {
         }
 
         return controlsJSON;
+    }
+
+    static {
+        if (isSupported()) {
+            Library.InitializeLibrary();
+            dswcLibrary = new Library();
+        }
     }
 }
