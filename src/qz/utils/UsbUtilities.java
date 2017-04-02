@@ -166,7 +166,7 @@ public class UsbUtilities {
 
     // shared by usb and hid streaming
     public static void setupUsbStream(final Session session, String UID, SocketConnection connection, final JSONObject params, final StreamEvent.Stream streamType) {
-        final DeviceIO usb = connection.getDevice(params.optString("vendorId"), params.optString("productId"));
+        final DeviceIO usb = (DeviceIO) connection.getDevice(params.optString("vendorId"), params.optString("productId"), null);
 
         if (usb != null) {
             if (!usb.isStreaming()) {

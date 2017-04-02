@@ -1,11 +1,12 @@
 package qz.ws;
 
 import jssc.SerialPortException;
+import org.apache.commons.collections4.keyvalue.MultiKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import qz.auth.Certificate;
 import qz.communication.DeviceException;
-import qz.communication.DeviceIO;
+import qz.communication.Device;
 import qz.communication.DeviceListener;
 import qz.communication.SerialIO;
 import qz.utils.UsbUtilities;
@@ -24,8 +25,8 @@ public class SocketConnection {
     // serial port -> open SerialIO
     private final HashMap<String,SerialIO> openSerialPorts = new HashMap<>();
 
-    //vendor id -> product id -> open DeviceIO
-    private final HashMap<Short,HashMap<Short,DeviceIO>> openDevices = new HashMap<>();
+    //vendor id -> product id -> open Device
+    private final HashMap<MultiKey,Device> openDevices = new HashMap<>();
 
 
     public SocketConnection(Certificate cert) {
@@ -70,21 +71,15 @@ public class SocketConnection {
     }
 
 
-    public void addDevice(short vendor, short product, DeviceIO io) {
-        HashMap<Short,DeviceIO> productMap = openDevices.get(vendor);
-        if (productMap == null) {
-            productMap = new HashMap<>();
-        }
-
-        productMap.put(product, io);
-        openDevices.put(vendor, productMap);
+    public void addDevice(short vendor, short product, String serial, Device io) {
+        openDevices.put(new MultiKey<String>(String.valueOf(vendor), String.valueOf(product), serial), io);
     }
 
-    public DeviceIO getDevice(String vendor, String product) {
-        return getDevice(UsbUtilities.hexToShort(vendor), UsbUtilities.hexToShort(product));
+    public Device getDevice(String vendor, String product, String serial) {
+        return getDevice(UsbUtilities.hexToShort(vendor), UsbUtilities.hexToShort(product), serial);
     }
 
-    public DeviceIO getDevice(Short vendor, Short product) {
+    public Device getDevice(Short vendor, Short product, String serial) {
         if (vendor == null) {
             throw new IllegalArgumentException("Vendor ID cannot be null");
         }
@@ -92,21 +87,16 @@ public class SocketConnection {
             throw new IllegalArgumentException("Product ID cannot be null");
         }
 
-        HashMap<Short,DeviceIO> productMap = openDevices.get(vendor);
-        if (productMap != null) {
-            return productMap.get(product);
-        }
-
-        return null;
+        return openDevices.get(new MultiKey<String>(String.valueOf(vendor), String.valueOf(product), serial));
     }
 
-    public void removeDevice(Short vendor, Short product) {
-        openDevices.get(vendor).remove(product);
+    public void removeDevice(Short vendor, Short product, String serial) {
+        openDevices.remove(new MultiKey<String>(String.valueOf(vendor), String.valueOf(product), serial));
     }
 
-    public synchronized void openDevice(DeviceIO device, short vendorId, short productId) throws DeviceException {
+    public synchronized void openDevice(Device device, short vendorId, short productId) throws DeviceException {
         device.open();
-        addDevice(vendorId, productId, device);
+        addDevice(vendorId, productId, null, device);
     }
 
     /**
@@ -115,15 +105,12 @@ public class SocketConnection {
     public synchronized void disconnect() throws SerialPortException, DeviceException {
         log.info("Closing all communication channels for {}", certificate.getCommonName());
 
-        for(String p : openSerialPorts.keySet()) {
-            openSerialPorts.get(p).close();
+        for (SerialIO port : openSerialPorts.values()) {
+            port.close();
         }
 
-        for(Short v : openDevices.keySet()) {
-            HashMap<Short,DeviceIO> pm = openDevices.get(v);
-            for(Short p : pm.keySet()) {
-                pm.get(p).close();
-            }
+        for (Device device : openDevices.values()) {
+            device.close();
         }
 
         stopListening();
