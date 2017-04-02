@@ -1182,6 +1182,17 @@ var qz = (function() {
          */
         uvc: {
             /**
+             * Is UVC support available?
+             *
+             * @returns {Promise<Boolean|Error>} Boolean value for supported
+             *
+             * @memberof qz.uvc
+             */
+            isSupported: function() {
+                return _qz.websocket.dataPromise('uvc.isSupported');
+            },
+
+            /**
              * List of available UVC devices. Includes (hexadecimal) vendor ID, (hexadecimal) product ID and serial number.
              *
              * @returns {Promise<Array<Object>|Error>} Array of JSON objects containing information on connected UVC devices.

@@ -1,5 +1,6 @@
 package qz.utils;
 
+import org.apache.commons.lang3.SystemUtils;
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
@@ -59,6 +60,10 @@ public class UvcUtilities {
         if (s == null) return null;
 
         return Pointer.pointerToCString(s);
+    }
+
+    public static Boolean isSupported() {
+        return SystemUtils.IS_OS_MAC_OSX || SystemUtils.IS_OS_LINUX;
     }
 
     public static Pointer<Pointer<Pointer<uvc_device>>> getUvcDevices(Pointer<Pointer<uvc_context>> ctx) throws DeviceException {

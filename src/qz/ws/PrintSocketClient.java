@@ -69,6 +69,7 @@ public class PrintSocketClient {
         HID_CLOSE_STREAM("hid.closeStream", false, "use a USB device"),
         HID_RELEASE_DEVICE("hid.releaseDevice", false, "release a USB device"),
 
+        UVC_IS_SUPPORTED("uvc.isSupported", true, "check UVC support"),
         UVC_LIST_DEVICES("uvc.listDevices", true, "access UVC devices"),
         UVC_LIST_CONTROLS("uvc.listControls", true, "access UVC devices"),
         UVC_OPEN_DEVICE("uvc.openDevice", true, "open a UVC device"),
@@ -277,6 +278,10 @@ public class PrintSocketClient {
 
         //call appropriate methods
         switch(call) {
+            case UVC_IS_SUPPORTED:
+                sendResult(session, UID, UvcUtilities.isSupported());
+                break;
+
             case PRINTERS_GET_DEFAULT:
                 sendResult(session, UID, PrintServiceLookup.lookupDefaultPrintService().getName());
                 break;
