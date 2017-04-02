@@ -513,6 +513,7 @@ public class PrintSocketClient {
                             break;
                         default:
                             sendError(session, UID, "Unknown or unsupported DSWC control");
+                    }
                 }
                 break;
             }
