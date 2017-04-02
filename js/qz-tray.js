@@ -1388,6 +1388,17 @@ var qz = (function() {
          */
         dswc: {
             /**
+             * Is DSWC support available?
+             *
+             * @returns {Promise<Boolean|Error>} Boolean value for supported
+             *
+             * @memberof qz.dswc
+             */
+            isSupported: function() {
+                return _qz.websocket.dataPromise('dswc.isSupported');
+            },
+
+            /**
              * List of available DirectShow webcams. Includes device name, optional description, and unique device path.
              *
              * @returns {Promise<Array<Object>|Error>} Array of JSON objects containing information on connected DirectShow webcams.

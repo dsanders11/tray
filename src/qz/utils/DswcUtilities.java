@@ -23,6 +23,10 @@ public class DswcUtilities {
     private static final HashMap<String,Webcam> webcamMap = new HashMap<>();
 
 
+    public static Boolean isSupported() {
+        return SystemUtils.IS_OS_WINDOWS;
+    }
+
     public static JSONArray getDswcWebcamsJSON() throws JSONException {
         JSONArray webcamsJSON = new JSONArray();
 

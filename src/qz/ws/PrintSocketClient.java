@@ -71,6 +71,7 @@ public class PrintSocketClient {
         HID_CLOSE_STREAM("hid.closeStream", false, "use a USB device"),
         HID_RELEASE_DEVICE("hid.releaseDevice", false, "release a USB device"),
 
+        DSWC_IS_SUPPORTED("dswc.isSupported", true, "check DSWC support"),
         DSWC_LIST_WEBCAMS("dswc.listWebcams", true, "access DSWC webcams"),
         DSWC_LIST_CONTROLS("dswc.listControls", true, "access DSWC webcam"),
         DSWC_GET_CONTROL("dswc.getControl", true, "get DSWC control"),
@@ -273,6 +274,10 @@ public class PrintSocketClient {
 
         //call appropriate methods
         switch(call) {
+            case DSWC_IS_SUPPORTED:
+                sendResult(session, UID, DswcUtilities.isSupported());
+                break;
+
             case PRINTERS_GET_DEFAULT:
                 sendResult(session, UID, PrintServiceLookup.lookupDefaultPrintService().getName());
                 break;
