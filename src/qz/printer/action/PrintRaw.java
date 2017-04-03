@@ -41,7 +41,7 @@ import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.Semaphore;
 
 
 /**
@@ -241,51 +241,49 @@ public class PrintRaw implements PrintProcessor {
 
         DocPrintJob printJob = service.createPrintJob();
 
-
-        final AtomicBoolean finished = new AtomicBoolean(false);
+        final Semaphore printerAvailable = new Semaphore(1, true);
         printJob.addPrintJobListener(new PrintJobListener() {
             @Override
             public void printDataTransferCompleted(PrintJobEvent printJobEvent) {
                 log.debug("{}", printJobEvent);
-                finished.set(true);
+                printerAvailable.release();
             }
 
             @Override
             public void printJobCompleted(PrintJobEvent printJobEvent) {
                 log.debug("{}", printJobEvent);
-                finished.set(true);
+                printerAvailable.release();
             }
 
             @Override
             public void printJobFailed(PrintJobEvent printJobEvent) {
                 log.error("{}", printJobEvent);
-                finished.set(true);
+                printerAvailable.release();
             }
 
             @Override
             public void printJobCanceled(PrintJobEvent printJobEvent) {
                 log.warn("{}", printJobEvent);
-                finished.set(true);
+                printerAvailable.release();
             }
 
             @Override
             public void printJobNoMoreEvents(PrintJobEvent printJobEvent) {
                 log.debug("{}", printJobEvent);
-                finished.set(true);
+                printerAvailable.release();
             }
 
             @Override
             public void printJobRequiresAttention(PrintJobEvent printJobEvent) {
                 log.info("{}", printJobEvent);
+                printerAvailable.release();
             }
         });
 
         log.trace("Sending print job to printer");
         printJob.print(doc, attributes);
 
-        while(!finished.get()) {
-            try { Thread.sleep(100); } catch(Exception ignore) {}
-        }
+        try { printerAvailable.acquire(); } catch(InterruptedException ignore) {}
 
         log.trace("Print job received by printer");
     }
