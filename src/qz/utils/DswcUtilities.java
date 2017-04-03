@@ -19,7 +19,8 @@ public class DswcUtilities {
 
     private static final Logger log = LoggerFactory.getLogger(DswcUtilities.class);
 
-    private static Library dswcLibrary = null;
+    private static ThreadLocal<Library> dswcLibrary = null;
+    //private static Library dswcLibrary = null;
 
     private static final HashMap<String,Webcam> webcamMap = new HashMap<>();
 
@@ -31,7 +32,7 @@ public class DswcUtilities {
     public static JSONArray getDswcWebcamsJSON() throws JSONException {
         JSONArray webcamsJSON = new JSONArray();
 
-        ArrayList<Webcam> webcams = dswcLibrary.ListWebcams();
+        ArrayList<Webcam> webcams = dswcLibrary.get().ListWebcams();
 
         for (Webcam webcam : webcams) {
             JSONObject webcamJSON = new JSONObject();
@@ -49,7 +50,7 @@ public class DswcUtilities {
         Webcam webcam = webcamMap.get(devicePath);
 
         if (webcam == null) {
-            webcam = dswcLibrary.GetWebcam(devicePath);
+            webcam = dswcLibrary.get().GetWebcam(devicePath);
 
             if (webcam != null) {
                 // Store so we don't have to use GetWebcam often
@@ -96,8 +97,13 @@ public class DswcUtilities {
 
     static {
         if (isSupported()) {
-            Library.InitializeLibrary();
-            dswcLibrary = new Library();
+            dswcLibrary = new ThreadLocal<Library>() {
+                @Override protected Library initialValue() {
+                    Library.InitializeLibrary();
+
+                    return new Library();
+                }
+            };
         }
     }
 }
