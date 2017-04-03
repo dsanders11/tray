@@ -1548,7 +1548,7 @@ var qz = (function() {
             },
 
             /**
-             * List of available DirectShow webcams. Includes device name, optional description, and unique device path.
+             * List of available DirectShow webcams. Includes device name and unique device path.
              *
              * @returns {Promise<Array<Object>|Error>} Array of JSON objects containing information on connected DirectShow webcams.
              *

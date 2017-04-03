@@ -38,12 +38,6 @@ public class DswcUtilities {
             webcamJSON.put("name", webcam.GetFriendlyName());
             webcamJSON.put("devicePath", webcam.GetDevicePath());
 
-            String description = webcam.GetDescription();
-
-            if (!description.isEmpty()) {
-                webcamJSON.put("description", description);
-            }
-
             webcam.Dispose();
             webcamsJSON.put(webcamJSON);
         }
