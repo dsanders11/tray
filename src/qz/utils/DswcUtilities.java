@@ -21,13 +21,6 @@ public class DswcUtilities {
 
     private static ThreadLocal<Library> dswcLibrary = null;
 
-    private static final ThreadLocal<HashMap<String,Webcam>> webcamMap = new ThreadLocal<HashMap<String,Webcam>>() {
-        @Override protected HashMap<String,Webcam> initialValue() {
-            return new HashMap<>();
-        }
-    };
-
-
     public static Boolean isSupported() {
         return SystemUtils.IS_OS_WINDOWS;
     }
@@ -50,20 +43,7 @@ public class DswcUtilities {
     }
 
     public static Webcam getWebcam(String devicePath) {
-        HashMap<String,Webcam> webcams = webcamMap.get();
-
-        Webcam webcam = webcams.get(devicePath);
-
-        if (webcam == null) {
-            webcam = dswcLibrary.get().GetWebcam(devicePath);
-
-            if (webcam != null) {
-                // Store so we don't have to use GetWebcam often
-                webcams.put(devicePath, webcam);
-            }
-        }
-
-        return webcam;
+        return dswcLibrary.get().GetWebcam(devicePath);
     }
 
     public static JSONArray listDswcControls(Webcam webcam) throws JSONException {
