@@ -20,9 +20,12 @@ public class DswcUtilities {
     private static final Logger log = LoggerFactory.getLogger(DswcUtilities.class);
 
     private static ThreadLocal<Library> dswcLibrary = null;
-    //private static Library dswcLibrary = null;
 
-    private static final HashMap<String,Webcam> webcamMap = new HashMap<>();
+    private static final ThreadLocal<HashMap<String,Webcam>> webcamMap = new ThreadLocal<HashMap<String,Webcam>>() {
+        @Override protected HashMap<String,Webcam> initialValue() {
+            return new HashMap<>();
+        }
+    };
 
 
     public static Boolean isSupported() {
@@ -47,14 +50,16 @@ public class DswcUtilities {
     }
 
     public static Webcam getWebcam(String devicePath) {
-        Webcam webcam = webcamMap.get(devicePath);
+        HashMap<String,Webcam> webcams = webcamMap.get();
+
+        Webcam webcam = webcams.get(devicePath);
 
         if (webcam == null) {
             webcam = dswcLibrary.get().GetWebcam(devicePath);
 
             if (webcam != null) {
                 // Store so we don't have to use GetWebcam often
-                webcamMap.put(devicePath, webcam);
+                webcams.put(devicePath, webcam);
             }
         }
 
