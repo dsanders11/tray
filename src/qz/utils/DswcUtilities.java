@@ -63,6 +63,16 @@ public class DswcUtilities {
                     controlJSON.put("current", webcam.GetFocus());
                     break;
 
+                case PAN:
+                    controlJSON.put("name", "Pan");
+                    controlJSON.put("current", webcam.GetPan());
+                    break;
+
+                case TILT:
+                    controlJSON.put("name", "Tilt");
+                    controlJSON.put("current", webcam.GetTilt());
+                    break;
+
                 default:
                     controlJSON.put("name", "Unknown");
                     controlJSON.put("current", -1);
