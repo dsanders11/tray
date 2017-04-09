@@ -539,6 +539,18 @@ public class PrintSocketClient {
                             controlJSON.put("value", webcam.GetTilt());
                             sendResult(session, UID, controlJSON);
                             break;
+                        case "Roll":
+                            controlJSON.put("value", webcam.GetRoll());
+                            sendResult(session, UID, controlJSON);
+                            break;
+                        case "Exposure":
+                            controlJSON.put("value", webcam.GetExposure());
+                            sendResult(session, UID, controlJSON);
+                            break;
+                        case "Iris":
+                            controlJSON.put("value", webcam.GetIris());
+                            sendResult(session, UID, controlJSON);
+                            break;
                         default:
                             sendError(session, UID, "Unknown or unsupported DSWC control");
                             break;
@@ -628,6 +640,15 @@ public class PrintSocketClient {
                             break;
                         case "Tilt":
                             webcam.SetTilt(value);
+                            break;
+                        case "Roll":
+                            webcam.SetRoll(value);
+                            break;
+                        case "Exposure":
+                            webcam.SetExposure(value);
+                            break;
+                        case "Iris":
+                            webcam.setIris(value);
                             break;
                         default:
                             sendError(session, UID, "Unknown or unsupported DSWC control");

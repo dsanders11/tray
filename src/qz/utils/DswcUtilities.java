@@ -73,6 +73,21 @@ public class DswcUtilities {
                     controlJSON.put("current", webcam.GetTilt());
                     break;
 
+                case ROLL:
+                    controlJSON.put("name", "Roll");
+                    controlJSON.put("current", webcam.GetRoll());
+                    break;
+
+                case EXPOSURE:
+                    controlJSON.put("name", "Exposure");
+                    controlJSON.put("current", webcam.GetExposure());
+                    break;
+
+                case IRIS:
+                    controlJSON.put("name", "Iris");
+                    controlJSON.put("current", webcam.GetIris());
+                    break;
+
                 default:
                     controlJSON.put("name", "Unknown");
                     controlJSON.put("current", -1);
