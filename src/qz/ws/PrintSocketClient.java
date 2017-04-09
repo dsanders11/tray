@@ -648,7 +648,7 @@ public class PrintSocketClient {
                             webcam.SetExposure(value);
                             break;
                         case "Iris":
-                            webcam.setIris(value);
+                            webcam.SetIris(value);
                             break;
                         default:
                             sendError(session, UID, "Unknown or unsupported DSWC control");
