@@ -15,6 +15,8 @@ import org.apache.log4j.PatternLayout;
 import org.apache.log4j.rolling.FixedWindowRollingPolicy;
 import org.apache.log4j.rolling.RollingFileAppender;
 import org.apache.log4j.rolling.SizeBasedTriggeringPolicy;
+import org.codehaus.jettison.json.JSONArray;
+import org.codehaus.jettison.json.JSONException;
 import org.eclipse.jetty.http.HttpVersion;
 import org.eclipse.jetty.server.*;
 import org.eclipse.jetty.util.MultiException;
@@ -27,12 +29,26 @@ import qz.common.Constants;
 import qz.common.SecurityInfo;
 import qz.common.TrayManager;
 import qz.deploy.DeployUtilities;
+import qz.queue.QueueClient;
+import qz.utils.FileUtilities;
 import qz.utils.SystemUtilities;
 
 import javax.swing.*;
 import java.io.File;
 import java.net.BindException;
 import java.util.*;
+import java.io.FileReader;
+import java.io.InputStreamReader;
+import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.net.BindException;
+import java.net.URL;
+import javax.net.ssl.HttpsURLConnection;
+import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -49,6 +65,7 @@ public class PrintSocketServer {
     public static final List<Integer> INSECURE_PORTS = Collections.unmodifiableList(Arrays.asList(8182, 8283, 8384, 8485));
 
 
+    private static List<QueueClient> queueClients = null;
     private static TrayManager trayManager;
     private static Properties trayProperties;
 
@@ -81,6 +98,8 @@ public class PrintSocketServer {
         log.info("Java version: {}", Constants.JAVA_VERSION.toString());
         setupFileLogging();
 
+        trayProperties = getTrayProperties();
+
         try {
             SwingUtilities.invokeAndWait(new Runnable() {
                 @Override
@@ -88,10 +107,18 @@ public class PrintSocketServer {
                     trayManager = new TrayManager();
                 }
             });
+            queueClients = runQueueClients();
             runServer();
         }
         catch(Exception e) {
             log.error("Could not start tray manager", e);
+        }
+
+        if (queueClients != null) {
+            // Try to release any claimed print jobs, we're not going to get to them
+            for (QueueClient client : queueClients) {
+                client.releaseClaimedQueue();
+            }
         }
 
         log.warn("The web socket server is no longer running");
@@ -118,12 +145,93 @@ public class PrintSocketServer {
         org.apache.log4j.Logger.getRootLogger().addAppender(fileAppender);
     }
 
+    public static List<QueueClient> runQueueClients() throws InvocationTargetException, InterruptedException {
+        boolean hasHttpQueueURL = trayProperties.containsKey("http.url");
+
+        if (hasHttpQueueURL && !trayProperties.containsKey("http.printerIDs")) {
+            throw new IllegalArgumentException("http.printerIDs required when using http.url");
+        } else if (!hasHttpQueueURL) {
+            String[] httpQueueKeys = new String[]{
+                "http.credentials", "http.maxClaim", "http.sleepSecs", "http.printerIDs"
+            };
+
+            for (String key : httpQueueKeys) {
+                if (trayProperties.containsKey(key)) {
+                    throw new IllegalArgumentException("Can only use key '" + key + "' if 'http.url' set");
+                }
+            }
+        }
+
+        if (hasHttpQueueURL) {
+            // Grab the required configuration keys
+            final String httpQueueURL = trayProperties.getProperty("http.url");
+            final ArrayList<String> httpQueuePrinterIDs = new ArrayList<String>();
+
+            try {
+                JSONArray printerIDs = new JSONArray(trayProperties.getProperty("http.printerIDs"));
+
+                for (int i=0; i < printerIDs.length(); i++) {
+                    httpQueuePrinterIDs.add(printerIDs.getString(i));
+                }
+            } catch(JSONException e) {
+                throw new IllegalArgumentException("'http.printerIDs' must be a JSON array of strings");
+            }
+
+            // Optional configuration keys
+            final String httpQueueCredentials = trayProperties.getProperty("http.credentials", null);
+            final int httpQueueMaxClaim;
+            final int httpQueueSleepSecs;
+
+            try {
+                httpQueueMaxClaim = Integer.parseUnsignedInt(trayProperties.getProperty("http.maxClaim", "5"));
+            } catch(NumberFormatException e) {
+                throw new IllegalArgumentException("'http.maxClaim' must be a positive integer");
+            }
+
+            try {
+                httpQueueSleepSecs = Integer.parseUnsignedInt(trayProperties.getProperty("http.sleepSecs", "30"));
+            } catch(NumberFormatException e) {
+                throw new IllegalArgumentException("'http.sleepSecs' must be a positive integer");
+            }
+
+            final ArrayList<QueueClient> queueClients = new ArrayList<QueueClient>();
+
+            for (String printerID : httpQueuePrinterIDs) {
+                final QueueClient client = new QueueClient(printerID, httpQueueURL, httpQueueCredentials);
+                queueClients.add(client);
+
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        boolean running = true;
+
+                        // There may be already claimed jobs if we were killed or
+                        // lost connection previously, so try to resume them
+                        client.processClaimedQueue();
+
+                        while (running) {
+                            client.claimAndProcessJobs(httpQueueMaxClaim);
+
+                            try {
+                                Thread.sleep(httpQueueSleepSecs*1000);
+                            } catch(InterruptedException e) {
+                                running = false;
+                            }
+                        }
+                    }
+                }).start();
+            }
+
+            return queueClients;
+        }
+
+        return null;
+    }
+
     public static void runServer() {
         final AtomicBoolean running = new AtomicBoolean(false);
         final AtomicInteger securePortIndex = new AtomicInteger(0);
         final AtomicInteger insecurePortIndex = new AtomicInteger(0);
-
-        trayProperties = getTrayProperties();
 
         while(!running.get() && securePortIndex.get() < SECURE_PORTS.size() && insecurePortIndex.get() < INSECURE_PORTS.size()) {
             Server server = new Server(INSECURE_PORTS.get(insecurePortIndex.get()));
