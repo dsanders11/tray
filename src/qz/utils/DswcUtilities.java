@@ -98,6 +98,7 @@ public class DswcUtilities {
             controlJSON.put("max", control.Max);
             controlJSON.put("min", control.Min);
             controlJSON.put("resolution", control.Step);
+            controlJSON.put("auto", control.Auto);
 
             controlsJSON.put(controlJSON);
         }
