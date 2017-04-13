@@ -299,7 +299,7 @@ public class QueueClient {
 
                     try {
                         JSONObject printJob = json.getJSONObject(key);
-                        this.lastJobBatch.add(printJob.getString("id"));
+                        this.lastJobBatch.add(key);
                         if (print(printJob)) {
                             markJobComplete(key);
                         } else {
