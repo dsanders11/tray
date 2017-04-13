@@ -307,6 +307,7 @@ public class QueueClient {
                         }
                     } catch(JSONException e) {
                         log.error("Bad JSON: {}", e.getMessage());
+                        markJobFailed(key);
                     }
                 }
             } else {
