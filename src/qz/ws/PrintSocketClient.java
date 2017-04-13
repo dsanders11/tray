@@ -622,13 +622,29 @@ public class PrintSocketClient {
 
             case DSWC_SET_CONTROL: {
                 Webcam webcam = DswcUtilities.getWebcam(params.getString("devicePath"));
+                String control = params.getString("control");
 
                 if (webcam == null) {
                     sendError(session, UID, "DSWC webcam not found");
                 } else {
+                    try {
+                        // Check for auto first, it's a special case value
+                        if (params.getString("value") == "auto") {
+                            if (control == "Focus") {
+                                webcam.SetFocusAuto();
+                                sendResult(session, UID, null);
+                                break;
+                            } else if (control == "Exposure") {
+                                webcam.SetExposureAuto();
+                                sendResult(session, UID, null);
+                                break;
+                            }
+                        }
+                    } catch (JSONException ignore) {}
+
                     int value = params.getInt("value");
 
-                    switch (params.getString("control")) {
+                    switch (control) {
                         case "Zoom":
                             webcam.SetZoom(value);
                             break;
