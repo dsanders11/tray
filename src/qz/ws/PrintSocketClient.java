@@ -629,12 +629,12 @@ public class PrintSocketClient {
                 } else {
                     try {
                         // Check for auto first, it's a special case value
-                        if (params.getString("value") == "auto") {
-                            if (control == "Focus") {
+                        if (params.getString("value").equals("auto")) {
+                            if (control.equals("Focus")) {
                                 webcam.SetFocusAuto();
                                 sendResult(session, UID, null);
                                 break;
-                            } else if (control == "Exposure") {
+                            } else if (control.equals("Exposure")) {
                                 webcam.SetExposureAuto();
                                 sendResult(session, UID, null);
                                 break;
