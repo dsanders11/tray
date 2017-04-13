@@ -15,11 +15,11 @@ import java.util.*;
  */
 
 public class PrinterStatusMonitor {
-    static class PrinterStatus{
-        String statusText;
-        String printerName;
-        Level severity;
-        int statusCode;
+    static public class PrinterStatus{
+        public String statusText;
+        public String printerName;
+        public Level severity;
+        public int statusCode;
 
         private PrinterStatus (String statusText, Level severity, int statusCode){
             this.statusText = statusText;
