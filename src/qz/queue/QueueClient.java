@@ -1,5 +1,6 @@
 package qz.queue;
 
+import org.apache.log4j.Level;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.slf4j.Logger;
@@ -12,27 +13,64 @@ import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.net.ProtocolException;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.Iterator;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import javax.net.ssl.HttpsURLConnection;
 
 import qz.printer.PrintOptions;
 import qz.printer.PrintOutput;
+import qz.printer.PrintServiceMatcher;
 import qz.printer.action.PrintProcessor;
+import qz.printer.status.PrinterListener;
+import qz.printer.status.PrinterStatusMonitor;
+
 import qz.utils.PrintingUtilities;
 
 
 public class QueueClient {
+    class QueuePrinterListener extends PrinterListener {
+        private final String printerName;
+        private final QueueClient client;
+
+        public QueuePrinterListener(QueueClient client, String printerName) {
+            super(null);
+            this.printerName = printerName;
+            this.client = client;
+        }
+
+        public void statusChanged(PrinterStatusMonitor.PrinterStatus status) {
+            if (status.printerName == this.printerName) {
+                if (status.severity.isGreaterOrEqual(Level.WARN)) {
+                    this.client.failLastJobs();
+                } else {
+                    this.client.printerStatusGood();
+                }
+            }
+        }
+    }
+
     private static final Logger log = LoggerFactory.getLogger(QueueClient.class);
+
+    private Boolean hasStatusListener;
+    private Boolean inFailureState;
+
+    private ArrayList<String> lastJobBatch;
+
+    private final Set<String> failedJobs;
+    private final Set<String> completedJobs;
 
     private final String printerID;
     private final String httpURL;
     private final String httpAuth;
 
-    // TODO - List of processed jobs that can't be marked as complete due to network problems
-
     public QueueClient(String printerID, String httpURL, String httpCredentials) {
+        this.hasStatusListener = false;
+        this.inFailureState = false;
         this.printerID = printerID;
 
         if (!httpURL.endsWith("/")) {
@@ -46,17 +84,60 @@ public class QueueClient {
         } else {
             httpAuth = null;
         }
+
+        this.lastJobBatch = new ArrayList<String>();
+
+        this.failedJobs = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
+        this.completedJobs = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
+
+        // Start a background thread for updating status of jobs in case of network outage
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                boolean running = true;
+
+                while (running) {
+                    for (Iterator<String> it = failedJobs.iterator(); it.hasNext(); ) {
+                        String failedJobID = it.next();
+
+                        if (markJobFailed(failedJobID)) {
+                            it.remove();
+                        }
+                    }
+
+                    for (Iterator<String> it = completedJobs.iterator(); it.hasNext(); ) {
+                        String completedJobID = it.next();
+
+                        if (markJobComplete(completedJobID)) {
+                            it.remove();
+                        }
+                    }
+
+                    try {
+                        Thread.sleep(2000);
+                    } catch(InterruptedException e) {
+                        running = false;
+                    }
+                }
+            }
+        }).start();
     }
 
     private boolean print(JSONObject job) throws JSONException {
-        // TODO - Find a way to pass job listener (addPrintJobListener)
         PrintProcessor processor = PrintingUtilities.getPrintProcessor(job.getJSONArray("data"));
         log.debug("Using {} to print", processor.getClass().getName());
         boolean success = true;
 
         try {
-            PrintOutput output = new PrintOutput(job.optJSONObject("printer"));
+            JSONObject printerObject = job.getJSONObject("printer");
+            PrintOutput output = new PrintOutput(printerObject);
             PrintOptions options = new PrintOptions(job.optJSONObject("options"), output);
+
+            if (this.hasStatusListener == true) {
+                String fullPrinterName = PrintServiceMatcher.findPrinterName(printerObject.getString("name"));
+                PrinterStatusMonitor.addStatusListener(new QueuePrinterListener(this, fullPrinterName));
+                this.hasStatusListener = true;
+            }
 
             processor.parseData(job.getJSONArray("data"), options);
             processor.print(output, options);
@@ -173,13 +254,11 @@ public class QueueClient {
                     try {
                         JSONObject printJob = json.getJSONObject(key);
                         boolean printed = print(printJob);
-                        // TODO - Retry logic if marking the job complete fails
                         if (printed) {
                             markJobComplete(key);
                         } else {
                             markJobFailed(key);
                         }
-                        // TODO - Failure listener events
                     } catch(JSONException e) {
                         log.error("Bad JSON: {}", e.getMessage());
                     }
@@ -196,7 +275,12 @@ public class QueueClient {
     }
 
     public void claimAndProcessJobs(int maxClaim) {
-        String jobs = httpRequest("POST", printerID + "/claim/", "&max_num=" + maxClaim);
+        if (!shouldPrint()) {
+            log.warn("Skipping claim print jobs due to current QueueClient state");
+            return;
+        }
+
+        String jobs = httpRequest("POST", printerID + "/claim/", "max_num=" + maxClaim);
 
         if (jobs == null) {
             log.error("Failed to claim print jobs");
@@ -207,6 +291,7 @@ public class QueueClient {
             JSONObject json = new JSONObject(jobs);
 
             if (json.length() > 0) {
+                this.lastJobBatch.clear();
                 Iterator<?> keys = json.keys();
 
                 while (keys.hasNext()) {
@@ -214,10 +299,12 @@ public class QueueClient {
 
                     try {
                         JSONObject printJob = json.getJSONObject(key);
-                        print(printJob);
-                        // TODO - Retry logic if marking the job complete fails
-                        markJobComplete(key);
-                        // TODO - Failure
+                        this.lastJobBatch.add(printJob.getString("id"));
+                        if (print(printJob)) {
+                            markJobComplete(key);
+                        } else {
+                            markJobFailed(key);
+                        }
                     } catch(JSONException e) {
                         log.error("Bad JSON: {}", e.getMessage());
                     }
@@ -231,6 +318,26 @@ public class QueueClient {
         }
     }
 
+    public void failLastJobs() {
+        this.inFailureState = true;
+
+        for (String jobID : this.lastJobBatch) {
+            markJobFailed(jobID);
+        }
+    }
+
+    public void printerStatusGood() {
+        this.inFailureState = false;
+    }
+
+    public boolean shouldPrint() {
+        boolean stateOK = this.inFailureState == false;
+        boolean completedQueueSmall = this.completedJobs.size() < 20;
+        boolean failedQueueSmall = this.failedJobs.size() < 20;
+
+        return stateOK && completedQueueSmall && failedQueueSmall;
+    }
+
     public void releaseClaimedQueue() {
         String response = httpRequest("DELETE", printerID + "/claimed/", true);
 
@@ -239,19 +346,27 @@ public class QueueClient {
         }
     }
 
-    private void markJobComplete(String jobID) {
+    private boolean markJobComplete(String jobID) {
         String response = httpRequest("POST", "complete/", "job_id=" + jobID);
 
         if (response == null) {
             log.error("Failed to mark print job as complete");
+            this.completedJobs.add(jobID);
+            return false;
         }
+
+        return true;
     }
 
-    private void markJobFailed(String jobID) {
+    private boolean markJobFailed(String jobID) {
         String response = httpRequest("POST", "fail/", "job_id=" + jobID);
 
         if (response == null) {
             log.error("Failed to mark print job as failed");
+            this.failedJobs.add(jobID);
+            return false;
         }
+
+        return true;
     }
 }
