@@ -26,37 +26,13 @@ import qz.printer.PrintOptions;
 import qz.printer.PrintOutput;
 import qz.printer.PrintServiceMatcher;
 import qz.printer.action.PrintProcessor;
-import qz.printer.status.PrinterListener;
-import qz.printer.status.PrinterStatusMonitor;
 
 import qz.utils.PrintingUtilities;
 
 
 public class QueueClient {
-    class QueuePrinterListener extends PrinterListener {
-        private final String printerName;
-        private final QueueClient client;
-
-        public QueuePrinterListener(QueueClient client, String printerName) {
-            super(null);
-            this.printerName = printerName;
-            this.client = client;
-        }
-
-        public void statusChanged(PrinterStatusMonitor.PrinterStatus status) {
-            if (status.printerName == this.printerName) {
-                if (status.severity.isGreaterOrEqual(Level.WARN)) {
-                    this.client.failLastJobs();
-                } else {
-                    this.client.printerStatusGood();
-                }
-            }
-        }
-    }
-
     private static final Logger log = LoggerFactory.getLogger(QueueClient.class);
 
-    private Boolean hasStatusListener;
     private Boolean inFailureState;
 
     private ArrayList<String> lastJobBatch;
@@ -69,7 +45,6 @@ public class QueueClient {
     private final String httpAuth;
 
     public QueueClient(String printerID, String httpURL, String httpCredentials) {
-        this.hasStatusListener = false;
         this.inFailureState = false;
         this.printerID = printerID;
 
@@ -132,12 +107,6 @@ public class QueueClient {
             JSONObject printerObject = job.getJSONObject("printer");
             PrintOutput output = new PrintOutput(printerObject);
             PrintOptions options = new PrintOptions(job.optJSONObject("options"), output);
-
-            if (this.hasStatusListener == true) {
-                String fullPrinterName = PrintServiceMatcher.findPrinterName(printerObject.getString("name"));
-                PrinterStatusMonitor.addStatusListener(new QueuePrinterListener(this, fullPrinterName));
-                this.hasStatusListener = true;
-            }
 
             processor.parseData(job.getJSONArray("data"), options);
             processor.print(output, options);
