@@ -452,11 +452,7 @@ public class TrayManager {
                 public void run() {
                     try {
                         setDangerIcon();
-                        running.set(false);
-                        securePortIndex.set(0);
-                        insecurePortIndex.set(0);
-
-                        server.stop();
+                        PrintSocketServer.reloadServer();
                     }
                     catch(Exception e) {
                         displayErrorMessage("Error stopping print socket: " + e.getLocalizedMessage());

@@ -19,6 +19,7 @@ import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.eclipse.jetty.http.HttpVersion;
 import org.eclipse.jetty.server.*;
+import org.eclipse.jetty.server.handler.StatisticsHandler;
 import org.eclipse.jetty.util.MultiException;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.websocket.server.WebSocketHandler;
@@ -66,8 +67,13 @@ public class PrintSocketServer {
 
 
     private static List<QueueClient> queueClients = null;
-    private static TrayManager trayManager;
-    private static Properties trayProperties;
+    private static TrayManager trayManager = null;
+    private static Properties trayProperties = null;
+    private static Server server = null;
+
+    private static final AtomicBoolean running = new AtomicBoolean(true);
+    private static final AtomicInteger securePortIndex = new AtomicInteger(0);
+    private static final AtomicInteger insecurePortIndex = new AtomicInteger(0);
 
 
     public static void main(String[] args) {
@@ -228,13 +234,20 @@ public class PrintSocketServer {
         return null;
     }
 
-    public static void runServer() {
-        final AtomicBoolean running = new AtomicBoolean(false);
-        final AtomicInteger securePortIndex = new AtomicInteger(0);
-        final AtomicInteger insecurePortIndex = new AtomicInteger(0);
+    public static void reloadServer() throws Exception {
+        // Force reload of tray properties
+        trayProperties = null;
 
-        while(!running.get() && securePortIndex.get() < SECURE_PORTS.size() && insecurePortIndex.get() < INSECURE_PORTS.size()) {
-            Server server = new Server(INSECURE_PORTS.get(insecurePortIndex.get()));
+        securePortIndex.set(0);
+        insecurePortIndex.set(0);
+
+        server.stop();
+    }
+
+    public static void runServer() {
+        while(running.get() && securePortIndex.get() < SECURE_PORTS.size() && insecurePortIndex.get() < INSECURE_PORTS.size()) {
+            trayProperties = getTrayProperties();
+            server = new Server(INSECURE_PORTS.get(insecurePortIndex.get()));
 
             if (trayProperties != null) {
                 // Bind the secure socket on the proper port number (i.e. 9341), add it as an additional connector
@@ -262,7 +275,10 @@ public class PrintSocketServer {
                         factory.getPolicy().setMaxTextMessageSize(MAX_MESSAGE_SIZE);
                     }
                 };
-                server.setHandler(wsHandler);
+                StatisticsHandler statsHandler = new StatisticsHandler();
+                statsHandler.setHandler(wsHandler);
+                server.setHandler(statsHandler);
+                server.setStopTimeout(1000);
                 server.setStopAtShutdown(true);
                 server.start();
 
@@ -271,6 +287,10 @@ public class PrintSocketServer {
                 log.info("Server started on port(s) " + TrayManager.getPorts(server));
 
                 server.join();
+                while (!server.isStopped()) {
+                    Thread.sleep(100);
+                }
+                server.destroy();
             }
             catch(BindException | MultiException e) {
                 //order of getConnectors is the order we added them -> insecure first
