@@ -15,6 +15,19 @@ import org.apache.log4j.PatternLayout;
 import org.apache.log4j.rolling.FixedWindowRollingPolicy;
 import org.apache.log4j.rolling.RollingFileAppender;
 import org.apache.log4j.rolling.SizeBasedTriggeringPolicy;
+import org.bouncycastle.asn1.x500.*;
+import org.bouncycastle.asn1.x500.style.*;
+import org.bouncycastle.asn1.x509.*;
+import org.bouncycastle.asn1.pkcs.*;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateHolder;
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.bouncycastle.operator.ContentSigner;
+import org.bouncycastle.operator.OperatorCreationException;
+import org.bouncycastle.openssl.PEMWriter;
+import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequestBuilder;
+import org.bouncycastle.pkcs.PKCS10CertificationRequest;
+import org.bouncycastle.pkcs.PKCS10CertificationRequestBuilder;
+import org.bouncycastle.util.io.pem.PemObject;
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.eclipse.jetty.http.HttpVersion;
@@ -41,12 +54,24 @@ import java.util.*;
 import java.io.FileReader;
 import java.io.InputStreamReader;
 import java.io.IOException;
+import java.io.StringWriter;
 import java.lang.reflect.InvocationTargetException;
 import java.net.BindException;
 import java.net.URL;
 import javax.net.ssl.HttpsURLConnection;
+import javax.security.auth.x500.X500Principal;
+import java.security.spec.RSAKeyGenParameterSpec;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.Key;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.KeyStore;
+import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
+import java.security.Signature;
 import java.util.Arrays;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
@@ -77,6 +102,8 @@ public class PrintSocketServer {
 
 
     public static void main(String[] args) {
+        java.security.Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
+
         for(String s : args) {
             // Print version information and exit
             if ("-v".equals(s) || "--version".equals(s)) {
@@ -128,6 +155,77 @@ public class PrintSocketServer {
         }
 
         log.warn("The web socket server is no longer running");
+    }
+
+    public static void generateCSR(String keyStorePath, String keyStorePass, String keyStoreKeyPassword) {
+        java.io.FileInputStream fis = null;
+        String subject = null;
+        PrivateKey key = null;
+
+        try {
+            fis = new java.io.FileInputStream(keyStorePath);
+
+            KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
+            ks.load(fis, keyStorePass.toCharArray());
+
+            java.security.cert.X509Certificate cert = (java.security.cert.X509Certificate) ks.getCertificate("qz-tray");
+
+            X500Name x500name = new JcaX509CertificateHolder(cert).getSubject();
+            RDN cn = x500name.getRDNs(BCStyle.CN)[0];
+
+            subject = IETFUtils.valueToString(cn.getFirst().getValue());
+            key = (PrivateKey) ks.getKey("qz-tray", keyStoreKeyPassword.toCharArray());
+
+            Signature signer = Signature.getInstance("SHA256WithRSA/PSS", "BC");
+            signer.initSign(key);
+            String temp = "foobar";
+            signer.update(temp.getBytes());
+            Base64.Encoder encoder = Base64.getUrlEncoder();
+            String signature = encoder.encodeToString(signer.sign());
+            System.out.println(signature);
+        } catch(Exception e) {
+            // TODO
+            e.printStackTrace();
+        } finally {
+            if (fis != null) {
+                try {
+                    fis.close();
+                } catch(IOException e) {
+                    // Ignore
+                }
+            }
+        }
+
+        try {
+            KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
+            RSAKeyGenParameterSpec params = new RSAKeyGenParameterSpec(2048, RSAKeyGenParameterSpec.F4);
+            kpg.initialize(params);
+            KeyPair pair = kpg.generateKeyPair();
+
+            GeneralNames subjectAltNames = new GeneralNames(new GeneralName(GeneralName.dNSName, subject));
+
+            ExtensionsGenerator extGen = new ExtensionsGenerator();
+            extGen.addExtension(Extension.basicConstraints, true, new BasicConstraints(false));
+            extGen.addExtension(Extension.subjectAlternativeName, false, subjectAltNames);
+
+            PKCS10CertificationRequestBuilder p10Builder = new JcaPKCS10CertificationRequestBuilder(
+                new X500Principal("CN=" + subject), pair.getPublic());
+            p10Builder.addAttribute(PKCSObjectIdentifiers.pkcs_9_at_extensionRequest, extGen.generate());
+
+            JcaContentSignerBuilder csBuilder = new JcaContentSignerBuilder("SHA256withRSA");
+            ContentSigner signer = csBuilder.build(pair.getPrivate());
+
+            PKCS10CertificationRequest csr = p10Builder.build(signer);
+
+            PemObject pemObject = new PemObject("CERTIFICATE REQUEST", csr.getEncoded());
+            StringWriter str = new StringWriter();
+            PEMWriter pemWriter = new PEMWriter(str);
+            pemWriter.writeObject(pemObject);
+            pemWriter.close();
+            System.out.println(str);
+        } catch(Exception e) {
+            // TODO
+        }
     }
 
     public static void setupFileLogging() {
@@ -250,11 +348,17 @@ public class PrintSocketServer {
             server = new Server(INSECURE_PORTS.get(insecurePortIndex.get()));
 
             if (trayProperties != null) {
+                String keyStorePath = trayProperties.getProperty("wss.keystore");
+                String keyStorePassword = trayProperties.getProperty("wss.storepass");
+                String keyStoreKeyPassword = trayProperties.getProperty("wss.keypass");
+
                 // Bind the secure socket on the proper port number (i.e. 9341), add it as an additional connector
                 SslContextFactory sslContextFactory = new SslContextFactory();
-                sslContextFactory.setKeyStorePath(trayProperties.getProperty("wss.keystore"));
-                sslContextFactory.setKeyStorePassword(trayProperties.getProperty("wss.storepass"));
-                sslContextFactory.setKeyManagerPassword(trayProperties.getProperty("wss.keypass"));
+                sslContextFactory.setKeyStorePath(keyStorePath);
+                sslContextFactory.setKeyStorePassword(keyStorePassword);
+                sslContextFactory.setKeyManagerPassword(keyStoreKeyPassword);
+
+                generateCSR(keyStorePath, keyStorePassword, keyStoreKeyPassword);
 
                 SslConnectionFactory sslConnection = new SslConnectionFactory(sslContextFactory, HttpVersion.HTTP_1_1.asString());
                 HttpConnectionFactory httpConnection = new HttpConnectionFactory(new HttpConfiguration());
@@ -285,6 +389,11 @@ public class PrintSocketServer {
                 running.set(true);
                 trayManager.setServer(server, running, securePortIndex, insecurePortIndex);
                 log.info("Server started on port(s) " + TrayManager.getPorts(server));
+
+                // HACK
+                //Thread.sleep(20000);
+                //server.stop();
+                // END HACK
 
                 server.join();
                 while (!server.isStopped()) {
