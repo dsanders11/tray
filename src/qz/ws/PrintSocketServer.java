@@ -23,13 +23,14 @@ import org.bouncycastle.cert.jcajce.JcaX509CertificateHolder;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.OperatorCreationException;
-import org.bouncycastle.openssl.PEMWriter;
+import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
 import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequestBuilder;
 import org.bouncycastle.pkcs.PKCS10CertificationRequest;
 import org.bouncycastle.pkcs.PKCS10CertificationRequestBuilder;
 import org.bouncycastle.util.io.pem.PemObject;
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
+import org.codehaus.jettison.json.JSONObject;
 import org.eclipse.jetty.http.HttpVersion;
 import org.eclipse.jetty.server.*;
 import org.eclipse.jetty.server.handler.StatisticsHandler;
@@ -51,15 +52,15 @@ import javax.swing.*;
 import java.io.File;
 import java.net.BindException;
 import java.util.*;
-import java.io.FileReader;
-import java.io.InputStreamReader;
-import java.io.IOException;
-import java.io.StringWriter;
+import java.io.*;
 import java.lang.reflect.InvocationTargetException;
+import java.nio.charset.StandardCharsets;
 import java.net.BindException;
+import java.net.ProtocolException;
 import java.net.URL;
 import javax.net.ssl.HttpsURLConnection;
 import javax.security.auth.x500.X500Principal;
+import java.security.cert.CertificateFactory;
 import java.security.spec.RSAKeyGenParameterSpec;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.Key;
@@ -72,6 +73,10 @@ import java.security.Signature;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
@@ -91,15 +96,303 @@ public class PrintSocketServer {
     public static final List<Integer> INSECURE_PORTS = Collections.unmodifiableList(Arrays.asList(8182, 8283, 8384, 8485));
 
 
+    private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     private static List<QueueClient> queueClients = null;
     private static TrayManager trayManager = null;
     private static Properties trayProperties = null;
     private static Server server = null;
 
+    private static String keyStorePath = null;
+    private static String keyStorePassword = null;
+    private static String keyStoreKeyPassword = null;
+
     private static final AtomicBoolean running = new AtomicBoolean(true);
     private static final AtomicInteger securePortIndex = new AtomicInteger(0);
     private static final AtomicInteger insecurePortIndex = new AtomicInteger(0);
 
+
+    static class LetsEncryptRenewalRunnable implements Runnable {
+        private String renewalURL;
+        private String renewalCredentials;
+
+        private String keyStorePath;
+        private String keyStorePassword;
+        private String keyStoreKeyPassword;
+
+        private String httpAuth;
+        private List<String> httpCookies;
+
+        private boolean firstRun;
+
+        LetsEncryptRenewalRunnable(String renewalURL, String renewalCredentials, String keyStorePath, String keyStorePassword, String keyStoreKeyPassword) {
+            System.out.println("===== CREATING RENEWAL ======");
+
+            this.renewalURL = renewalURL;
+            this.renewalCredentials = renewalCredentials;
+
+            this.httpAuth = new String(Base64.getEncoder().encode(renewalCredentials.getBytes()));
+            this.httpCookies = new ArrayList<String>();
+
+            this.keyStorePath = keyStorePath;
+            this.keyStorePassword = keyStorePassword;
+            this.keyStoreKeyPassword = keyStoreKeyPassword;
+
+            this.firstRun = true;
+        }
+
+        public void run() {
+            KeyStore ks = null;
+            java.io.FileInputStream fis = null;
+
+            try {
+                // XXX - Shitty hack to prevent this from running immediately
+                //       on initial start-up and trampling the regular start-up
+                //       if the certificate is eligible to be renewed immediately
+                if (this.firstRun) {
+                    Thread.sleep(300000);
+                    firstRun = false;
+                }
+
+                fis = new java.io.FileInputStream(keyStorePath);
+
+                ks = KeyStore.getInstance(KeyStore.getDefaultType());
+                ks.load(fis, keyStorePassword.toCharArray());
+
+                java.security.cert.X509Certificate cert = (java.security.cert.X509Certificate) ks.getCertificate("qz-tray");
+                long diff = cert.getNotAfter().getTime() - new Date().getTime();
+                long daysTillExpiration = TimeUnit.DAYS.convert(diff, TimeUnit.MILLISECONDS);
+
+                if (false && daysTillExpiration > 60) {
+                    log.info("Skipping Let's Encrypt certificate renewal, still " + daysTillExpiration + " days left");
+                    return;
+                }
+            } catch(Exception e) {
+                // TODO
+                e.printStackTrace();
+                return;
+            } finally {
+                if (fis != null) {
+                    try {
+                        fis.close();
+                    } catch(IOException e) {
+                        log.warn("Error closing KeyStore file");
+                    }
+                }
+            }
+
+            String challenge = null;
+            String signature = null;
+
+            try {
+                String response = httpRequest("GET", renewalURL, null);
+                challenge = new JSONObject(response).getString("challenge");
+            } catch(Exception e) {
+                log.error("Error getting challenge for Let's Encrypt cert renewal");
+                return;
+            }
+
+            // Sign the challenge with the current private key
+            try {
+                PrivateKey key = (PrivateKey) ks.getKey("qz-tray", keyStoreKeyPassword.toCharArray());
+                Signature signer = Signature.getInstance("SHA256WithRSA/PSS", "BC");
+                signer.initSign(key);
+                signer.update(challenge.getBytes());
+                signature = Base64.getUrlEncoder().encodeToString(signer.sign());
+            } catch(Exception e) {
+                log.error("Error signing challenge for Let's Encrypt cert renewal");
+                return;
+            }
+
+            System.out.println(challenge);
+            System.out.println(signature);
+
+            String pemCSR = null;
+            PrivateKey privateKey = null;
+
+            try {
+                java.security.cert.X509Certificate unwrappedCert = (java.security.cert.X509Certificate) ks.getCertificate("qz-tray");
+
+                JcaX509CertificateHolder cert = new JcaX509CertificateHolder(unwrappedCert);
+                RDN cn = cert.getSubject().getRDNs(BCStyle.CN)[0];
+
+                String subject = IETFUtils.valueToString(cn.getFirst().getValue());
+
+                KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
+                RSAKeyGenParameterSpec params = new RSAKeyGenParameterSpec(2048, RSAKeyGenParameterSpec.F4);
+                kpg.initialize(params);
+                KeyPair pair = kpg.generateKeyPair();
+
+                GeneralNames subjectAltNames = new GeneralNames(new GeneralName(GeneralName.dNSName, subject));
+
+                ExtensionsGenerator extGen = new ExtensionsGenerator();
+                extGen.addExtension(Extension.basicConstraints, true, new BasicConstraints(false));
+                extGen.addExtension(Extension.subjectAlternativeName, false, subjectAltNames);
+
+                PKCS10CertificationRequestBuilder p10Builder = new JcaPKCS10CertificationRequestBuilder(
+                    new X500Principal("CN=" + subject), pair.getPublic());
+                p10Builder.addAttribute(PKCSObjectIdentifiers.pkcs_9_at_extensionRequest, extGen.generate());
+
+                JcaContentSignerBuilder csBuilder = new JcaContentSignerBuilder("SHA256withRSA");
+                privateKey = pair.getPrivate();
+                ContentSigner signer = csBuilder.build(privateKey);
+
+                PKCS10CertificationRequest csr = p10Builder.build(signer);
+
+                PemObject pemObject = new PemObject("CERTIFICATE REQUEST", csr.getEncoded());
+                StringWriter str = new StringWriter();
+                JcaPEMWriter pemWriter = new JcaPEMWriter(str);
+                pemWriter.writeObject(pemObject);
+                pemWriter.close();
+
+                pemCSR = str.toString();
+            } catch(Exception e) {
+                log.error("Error generating CSR for Let's Encrypt cert renewal");
+                return;
+            }
+
+            System.out.println(pemCSR);
+
+            String getCertificateURL = null;
+
+            try {
+                java.security.cert.X509Certificate unwrappedCert = (java.security.cert.X509Certificate) ks.getCertificate("qz-tray");
+
+                JcaX509CertificateHolder cert = new JcaX509CertificateHolder(unwrappedCert);
+                PemObject pemObject = new PemObject("CERTIFICATE", cert.getEncoded());
+                StringWriter str = new StringWriter();
+                JcaPEMWriter pemWriter = new JcaPEMWriter(str);
+                pemWriter.writeObject(pemObject);
+                pemWriter.close();
+
+                JSONObject data = new JSONObject();
+                data.put("csr", pemCSR);
+                data.put("certificate", str.toString());
+                data.put("signature", signature);
+
+                String response = httpRequest("POST", renewalURL, data.toString());
+                getCertificateURL = new JSONObject(response).getString("url");
+            } catch(Exception e) {
+                log.error("Error sending CSR for Let's Encrypt cert renewal to server");
+                return;
+            }
+
+            System.out.println(getCertificateURL);
+
+            String certificate = null;
+
+            try {
+                // XXX - Hacky, but sleep to give it long enough to succeed.
+                //       This could instead be a poll every few seconds, but
+                //       I got lazy and that was going to get messy quickly
+                Thread.sleep(30000);
+                String response = httpRequest("GET", getCertificateURL, null);
+                JSONObject jsonResponse = new JSONObject(response);
+                String status = jsonResponse.getString("status");
+
+                if (status == "success") {
+                    certificate = jsonResponse.getString("certificate");
+                } else {
+                    log.error("Status for Let's Encrypt cert renewal was '" + status + "'' after waiting");
+                    return;
+                }
+            } catch(Exception e) {
+                log.error("Error getting certificate for Let's Encrypt cert renewal");
+                return;
+            }
+
+            try {
+                InputStream stream = new ByteArrayInputStream(certificate.getBytes(StandardCharsets.UTF_8.name()));
+                java.security.cert.X509Certificate cert = (java.security.cert.X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(stream);
+
+                ks.setCertificateEntry("qz-tray", cert);
+                ks.setKeyEntry("qz-tray", privateKey, keyStoreKeyPassword.toCharArray(), new java.security.cert.Certificate[]{ cert });
+
+                java.io.FileOutputStream fos = null;
+                try {
+                    fos = new java.io.FileOutputStream(keyStorePath);
+                    ks.store(fos, keyStorePassword.toCharArray());
+                } finally {
+                    if (fos != null) {
+                        try {
+                            fos.close();
+                        } catch(IOException e) {
+                            log.warn("Error closing KeyStore file");
+                        }
+                    }
+                }
+            } catch(Exception e) {
+                log.error("Error saving cert from Let's Encrypt cert renewal");
+                return;
+            }
+
+            try {
+                PrintSocketServer.reloadServer();
+            } catch (Exception e) {
+                log.error("Failed to reload after renewing Let's Encrypt cert");
+            }
+        }
+
+        private String httpRequest(String method, String url, String data) {
+            BufferedReader resultReader = null;
+
+            try {
+                HttpsURLConnection connection = (HttpsURLConnection) new URL(url).openConnection();
+                try {
+                    connection.setRequestMethod(method);
+                } catch (ProtocolException e) {
+                    throw new IllegalArgumentException("Invalid HTTP method");
+                }
+                if (data != null) {
+                    connection.setDoOutput(true);
+                }
+                if (httpAuth != null) {
+                    connection.setRequestProperty("Authorization", "Basic " + httpAuth);
+                }
+                for (String cookie : httpCookies) {
+                    connection.addRequestProperty("Cookie", cookie);
+                }
+
+                connection.setConnectTimeout(2000);
+                connection.setReadTimeout(2000);
+
+                if (data != null) {
+                    OutputStreamWriter writer = new OutputStreamWriter(connection.getOutputStream());
+
+                    writer.write(data);
+                    writer.flush();
+                    writer.close();
+                }
+
+                resultReader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+
+                String response = resultReader.readLine();
+                int responseCode = connection.getResponseCode();
+                httpCookies = connection.getHeaderFields().get("Set-Cookie");
+
+                if (responseCode != HttpsURLConnection.HTTP_OK) {
+                    log.error("Got non-200 OK response from server", responseCode);
+                    return null;
+                }
+
+                return response;
+            } catch (IOException e) {
+                // Connection error
+                log.warn("Error connecting to URL", e);
+            } finally {
+                if (resultReader != null) {
+                    try {
+                        // If a connection was opened, try to close it
+                        resultReader.close();
+                    } catch (IOException e) {
+                        // Error closing the connection
+                        log.debug("Failed to close HTTPS connection", e);
+                    }
+                }
+            }
+
+            return null;
+        }
+    }
 
     public static void main(String[] args) {
         java.security.Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
@@ -133,6 +426,12 @@ public class PrintSocketServer {
 
         trayProperties = getTrayProperties();
 
+        if (trayProperties != null) {
+            keyStorePath = trayProperties.getProperty("wss.keystore");
+            keyStorePassword = trayProperties.getProperty("wss.storepass");
+            keyStoreKeyPassword = trayProperties.getProperty("wss.keypass");
+        }
+
         try {
             SwingUtilities.invokeAndWait(new Runnable() {
                 @Override
@@ -140,7 +439,21 @@ public class PrintSocketServer {
                     trayManager = new TrayManager();
                 }
             });
+
             queueClients = runQueueClients();
+
+            boolean hasLetsEncryptRenewalURL = trayProperties.containsKey("letsencrypt.renewal.url");
+
+            if (hasLetsEncryptRenewalURL) {
+                String renewalURL = trayProperties.getProperty("letsencrypt.renewal.url");
+                String renewalCredentials = trayProperties.getProperty("letsencrypt.renewal.credentials");
+
+                ScheduledFuture<?> letsEncryptRenewalService = scheduler.scheduleWithFixedDelay(
+                    new LetsEncryptRenewalRunnable(renewalURL, renewalCredentials,
+                        keyStorePath, keyStorePassword, keyStoreKeyPassword),
+                    0, 600, TimeUnit.SECONDS);
+            }
+
             runServer();
         }
         catch(Exception e) {
@@ -155,77 +468,6 @@ public class PrintSocketServer {
         }
 
         log.warn("The web socket server is no longer running");
-    }
-
-    public static void generateCSR(String keyStorePath, String keyStorePass, String keyStoreKeyPassword) {
-        java.io.FileInputStream fis = null;
-        String subject = null;
-        PrivateKey key = null;
-
-        try {
-            fis = new java.io.FileInputStream(keyStorePath);
-
-            KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
-            ks.load(fis, keyStorePass.toCharArray());
-
-            java.security.cert.X509Certificate cert = (java.security.cert.X509Certificate) ks.getCertificate("qz-tray");
-
-            X500Name x500name = new JcaX509CertificateHolder(cert).getSubject();
-            RDN cn = x500name.getRDNs(BCStyle.CN)[0];
-
-            subject = IETFUtils.valueToString(cn.getFirst().getValue());
-            key = (PrivateKey) ks.getKey("qz-tray", keyStoreKeyPassword.toCharArray());
-
-            Signature signer = Signature.getInstance("SHA256WithRSA/PSS", "BC");
-            signer.initSign(key);
-            String temp = "foobar";
-            signer.update(temp.getBytes());
-            Base64.Encoder encoder = Base64.getUrlEncoder();
-            String signature = encoder.encodeToString(signer.sign());
-            System.out.println(signature);
-        } catch(Exception e) {
-            // TODO
-            e.printStackTrace();
-        } finally {
-            if (fis != null) {
-                try {
-                    fis.close();
-                } catch(IOException e) {
-                    // Ignore
-                }
-            }
-        }
-
-        try {
-            KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
-            RSAKeyGenParameterSpec params = new RSAKeyGenParameterSpec(2048, RSAKeyGenParameterSpec.F4);
-            kpg.initialize(params);
-            KeyPair pair = kpg.generateKeyPair();
-
-            GeneralNames subjectAltNames = new GeneralNames(new GeneralName(GeneralName.dNSName, subject));
-
-            ExtensionsGenerator extGen = new ExtensionsGenerator();
-            extGen.addExtension(Extension.basicConstraints, true, new BasicConstraints(false));
-            extGen.addExtension(Extension.subjectAlternativeName, false, subjectAltNames);
-
-            PKCS10CertificationRequestBuilder p10Builder = new JcaPKCS10CertificationRequestBuilder(
-                new X500Principal("CN=" + subject), pair.getPublic());
-            p10Builder.addAttribute(PKCSObjectIdentifiers.pkcs_9_at_extensionRequest, extGen.generate());
-
-            JcaContentSignerBuilder csBuilder = new JcaContentSignerBuilder("SHA256withRSA");
-            ContentSigner signer = csBuilder.build(pair.getPrivate());
-
-            PKCS10CertificationRequest csr = p10Builder.build(signer);
-
-            PemObject pemObject = new PemObject("CERTIFICATE REQUEST", csr.getEncoded());
-            StringWriter str = new StringWriter();
-            PEMWriter pemWriter = new PEMWriter(str);
-            pemWriter.writeObject(pemObject);
-            pemWriter.close();
-            System.out.println(str);
-        } catch(Exception e) {
-            // TODO
-        }
     }
 
     public static void setupFileLogging() {
@@ -348,17 +590,11 @@ public class PrintSocketServer {
             server = new Server(INSECURE_PORTS.get(insecurePortIndex.get()));
 
             if (trayProperties != null) {
-                String keyStorePath = trayProperties.getProperty("wss.keystore");
-                String keyStorePassword = trayProperties.getProperty("wss.storepass");
-                String keyStoreKeyPassword = trayProperties.getProperty("wss.keypass");
-
                 // Bind the secure socket on the proper port number (i.e. 9341), add it as an additional connector
                 SslContextFactory sslContextFactory = new SslContextFactory();
                 sslContextFactory.setKeyStorePath(keyStorePath);
                 sslContextFactory.setKeyStorePassword(keyStorePassword);
                 sslContextFactory.setKeyManagerPassword(keyStoreKeyPassword);
-
-                generateCSR(keyStorePath, keyStorePassword, keyStoreKeyPassword);
 
                 SslConnectionFactory sslConnection = new SslConnectionFactory(sslContextFactory, HttpVersion.HTTP_1_1.asString());
                 HttpConnectionFactory httpConnection = new HttpConnectionFactory(new HttpConfiguration());
@@ -389,11 +625,6 @@ public class PrintSocketServer {
                 running.set(true);
                 trayManager.setServer(server, running, securePortIndex, insecurePortIndex);
                 log.info("Server started on port(s) " + TrayManager.getPorts(server));
-
-                // HACK
-                //Thread.sleep(20000);
-                //server.stop();
-                // END HACK
 
                 server.join();
                 while (!server.isStopped()) {
