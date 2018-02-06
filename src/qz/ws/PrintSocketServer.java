@@ -114,6 +114,7 @@ public class PrintSocketServer {
     static class LetsEncryptRenewalRunnable implements Runnable {
         private String renewalURL;
         private String renewalCredentials;
+        private int renewalDaysBeforeExpiration;
 
         private String keyStorePath;
         private String keyStorePassword;
@@ -124,11 +125,10 @@ public class PrintSocketServer {
 
         private boolean firstRun;
 
-        LetsEncryptRenewalRunnable(String renewalURL, String renewalCredentials, String keyStorePath, String keyStorePassword, String keyStoreKeyPassword) {
-            System.out.println("===== CREATING RENEWAL ======");
-
+        LetsEncryptRenewalRunnable(String renewalURL, String renewalCredentials, int renewalDaysBeforeExpiration, String keyStorePath, String keyStorePassword, String keyStoreKeyPassword) {
             this.renewalURL = renewalURL;
             this.renewalCredentials = renewalCredentials;
+            this.renewalDaysBeforeExpiration = renewalDaysBeforeExpiration;
 
             this.httpAuth = new String(Base64.getEncoder().encode(renewalCredentials.getBytes()));
             this.httpCookies = new ArrayList<String>();
@@ -149,7 +149,8 @@ public class PrintSocketServer {
                 //       on initial start-up and trampling the regular start-up
                 //       if the certificate is eligible to be renewed immediately
                 if (this.firstRun) {
-                    Thread.sleep(300000);
+                    // Thread.sleep(300000);
+                    Thread.sleep(30000);
                     firstRun = false;
                 }
 
@@ -162,13 +163,12 @@ public class PrintSocketServer {
                 long diff = cert.getNotAfter().getTime() - new Date().getTime();
                 long daysTillExpiration = TimeUnit.DAYS.convert(diff, TimeUnit.MILLISECONDS);
 
-                if (false && daysTillExpiration > 60) {
+                if (daysTillExpiration > renewalDaysBeforeExpiration) {
                     log.info("Skipping Let's Encrypt certificate renewal, still " + daysTillExpiration + " days left");
                     return;
                 }
             } catch(Exception e) {
-                // TODO
-                e.printStackTrace();
+                log.error("Couldn't open keystore to check for Let's Encrypt cert renewal");
                 return;
             } finally {
                 if (fis != null) {
@@ -202,9 +202,6 @@ public class PrintSocketServer {
                 log.error("Error signing challenge for Let's Encrypt cert renewal");
                 return;
             }
-
-            System.out.println(challenge);
-            System.out.println(signature);
 
             String pemCSR = null;
             PrivateKey privateKey = null;
@@ -250,8 +247,6 @@ public class PrintSocketServer {
                 return;
             }
 
-            System.out.println(pemCSR);
-
             String getCertificateURL = null;
 
             try {
@@ -276,8 +271,6 @@ public class PrintSocketServer {
                 return;
             }
 
-            System.out.println(getCertificateURL);
-
             String certificate = null;
 
             try {
@@ -289,7 +282,7 @@ public class PrintSocketServer {
                 JSONObject jsonResponse = new JSONObject(response);
                 String status = jsonResponse.getString("status");
 
-                if (status == "success") {
+                if (status.equals("success")) {
                     certificate = jsonResponse.getString("certificate");
                 } else {
                     log.error("Status for Let's Encrypt cert renewal was '" + status + "'' after waiting");
@@ -304,7 +297,6 @@ public class PrintSocketServer {
                 InputStream stream = new ByteArrayInputStream(certificate.getBytes(StandardCharsets.UTF_8.name()));
                 java.security.cert.X509Certificate cert = (java.security.cert.X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(stream);
 
-                ks.setCertificateEntry("qz-tray", cert);
                 ks.setKeyEntry("qz-tray", privateKey, keyStoreKeyPassword.toCharArray(), new java.security.cert.Certificate[]{ cert });
 
                 java.io.FileOutputStream fos = null;
@@ -328,6 +320,7 @@ public class PrintSocketServer {
             try {
                 PrintSocketServer.reloadServer();
             } catch (Exception e) {
+                e.printStackTrace();
                 log.error("Failed to reload after renewing Let's Encrypt cert");
             }
         }
@@ -447,11 +440,12 @@ public class PrintSocketServer {
             if (hasLetsEncryptRenewalURL) {
                 String renewalURL = trayProperties.getProperty("letsencrypt.renewal.url");
                 String renewalCredentials = trayProperties.getProperty("letsencrypt.renewal.credentials");
+                int renewalBeforeExpirationDays = Integer.parseUnsignedInt(trayProperties.getProperty("letsencrypt.renewal.daysBeforeExpiration", "5"));
 
                 ScheduledFuture<?> letsEncryptRenewalService = scheduler.scheduleWithFixedDelay(
-                    new LetsEncryptRenewalRunnable(renewalURL, renewalCredentials,
+                    new LetsEncryptRenewalRunnable(renewalURL, renewalCredentials, renewalBeforeExpirationDays,
                         keyStorePath, keyStorePassword, keyStoreKeyPassword),
-                    0, 600, TimeUnit.SECONDS);
+                    0, 1, TimeUnit.DAYS);
             }
 
             runServer();
