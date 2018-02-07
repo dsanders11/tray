@@ -149,8 +149,7 @@ public class PrintSocketServer {
                 //       on initial start-up and trampling the regular start-up
                 //       if the certificate is eligible to be renewed immediately
                 if (this.firstRun) {
-                    // Thread.sleep(300000);
-                    Thread.sleep(30000);
+                    Thread.sleep(300000);
                     firstRun = false;
                 }
 
@@ -163,7 +162,7 @@ public class PrintSocketServer {
                 long diff = cert.getNotAfter().getTime() - new Date().getTime();
                 long daysTillExpiration = TimeUnit.DAYS.convert(diff, TimeUnit.MILLISECONDS);
 
-                if (daysTillExpiration > renewalDaysBeforeExpiration) {
+                if (daysTillExpiration <= renewalDaysBeforeExpiration) {
                     log.info("Skipping Let's Encrypt certificate renewal, still " + daysTillExpiration + " days left");
                     return;
                 }
