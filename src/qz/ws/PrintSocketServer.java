@@ -194,7 +194,7 @@ public class PrintSocketServer {
             // Sign the challenge with the current private key
             try {
                 PrivateKey key = (PrivateKey) ks.getKey("qz-tray", keyStoreKeyPassword.toCharArray());
-                Signature signer = Signature.getInstance("SHA256WithRSA/PSS", "BC");
+                Signature signer = Signature.getInstance("SHA256withRSAandMGF1", "BC");
                 signer.initSign(key);
                 signer.update(challenge.getBytes());
                 signature = Base64.getUrlEncoder().encodeToString(signer.sign());
