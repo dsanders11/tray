@@ -162,7 +162,7 @@ public class PrintSocketServer {
                 long diff = cert.getNotAfter().getTime() - new Date().getTime();
                 long daysTillExpiration = TimeUnit.DAYS.convert(diff, TimeUnit.MILLISECONDS);
 
-                if (daysTillExpiration <= renewalDaysBeforeExpiration) {
+                if (daysTillExpiration > renewalDaysBeforeExpiration) {
                     log.info("Skipping Let's Encrypt certificate renewal, still " + daysTillExpiration + " days left");
                     return;
                 }
