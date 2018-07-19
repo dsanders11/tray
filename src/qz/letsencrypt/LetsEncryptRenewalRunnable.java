@@ -20,9 +20,7 @@ import org.slf4j.LoggerFactory;
 import qz.ws.PrintSocketServer;
 
 import java.io.*;
-import java.lang.reflect.InvocationTargetException;
 import java.nio.charset.StandardCharsets;
-import java.net.BindException;
 import java.net.ProtocolException;
 import java.net.URL;
 import javax.net.ssl.HttpsURLConnection;
@@ -37,17 +35,14 @@ import java.security.KeyStore;
 import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.Signature;
-import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Date;
+import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.Collections;
-import java.util.Date;
-import java.util.List;
-import java.util.Properties;
 
 public class LetsEncryptRenewalRunnable implements Runnable {
     private static final Logger log = LoggerFactory.getLogger(LetsEncryptRenewalRunnable.class);
