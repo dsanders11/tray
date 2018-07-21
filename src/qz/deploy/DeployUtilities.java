@@ -165,7 +165,7 @@ public abstract class DeployUtilities {
      * @return The calculated working path value, or an empty string if one
      * could not be determined
      */
-    static String getParentDirectory(String filePath) {
+    public static String getParentDirectory(String filePath) {
         // Working path should always default to the JARs parent folder
         int lastSlash = filePath.lastIndexOf(File.separator);
         return lastSlash < 0? "":filePath.substring(0, lastSlash);

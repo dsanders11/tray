@@ -1,0 +1,9 @@
+Bundle-Name: Let's Encrypt Auto Renewal
+Bundle-Description: A bundle that automatically renews Let's Encrypt certificates
+Bundle-Vendor: David Sanders
+Bundle-Version: 1.0.0
+Bundle-Activator: qz.letsencrypt.Activator
+Bundle-ClassPath: .,lib/printing/pdfbox-app-2.0.8.jar,lib/websocket/jettison-1.3.3.jar
+Export-Package: qz.service; qz.letsencrypt
+Private-Package: qz.letsencrypt.*
+Import-Package: org.osgi.framework; qz.service; qz.ws; org.slf4j; javax.net.ssl; javax.security.auth.x500

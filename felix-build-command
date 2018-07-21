@@ -1,0 +1,1 @@
+jar cfm out/dist/plugins/letsencrypt-renewal.jar src/qz/letsencrypt/manifest.mf -C out/build/qz-tray/ qz/letsencrypt lib/printing/pdfbox-app-2.0.8.jar lib/websocket/jettison-1.3.3.jar

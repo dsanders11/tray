@@ -10,6 +10,9 @@
 
 package qz.ws;
 
+import org.apache.felix.framework.Felix;
+import org.apache.felix.framework.util.FelixConstants;
+import org.apache.felix.main.AutoProcessor;
 import org.apache.log4j.Level;
 import org.apache.log4j.PatternLayout;
 import org.apache.log4j.rolling.FixedWindowRollingPolicy;
@@ -34,6 +37,10 @@ import qz.letsencrypt.LetsEncryptRenewalRunnable;
 import qz.queue.QueueClient;
 import qz.utils.FileUtilities;
 import qz.utils.SystemUtilities;
+import qz.service.PluginService;
+import felix.HostActivator;
+import org.osgi.framework.BundleContext;
+import org.osgi.framework.ServiceReference;
 
 import javax.swing.*;
 import java.io.File;
@@ -76,9 +83,10 @@ public class PrintSocketServer {
     private static final AtomicInteger securePortIndex = new AtomicInteger(0);
     private static final AtomicInteger insecurePortIndex = new AtomicInteger(0);
 
-    public static void main(String[] args) {
-        java.security.Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
+    private static HostActivator m_activator = null;
+    private static Felix m_felix = null;
 
+    public static void main(String[] args) {
         for(String s : args) {
             // Print version information and exit
             if ("-v".equals(s) || "--version".equals(s)) {
@@ -106,7 +114,70 @@ public class PrintSocketServer {
         log.info("Java version: {}", Constants.JAVA_VERSION.toString());
         setupFileLogging();
 
+        // Create a configuration property map.
+        Map config = new HashMap();
+        // Create host activator
+        m_activator = new HostActivator();
+        List list = new ArrayList();
+        list.add(m_activator);
+        config.put(FelixConstants.SYSTEMBUNDLE_ACTIVATORS_PROP, list);
+
+        // Extra packages accessible from the host, in bundles. qz.service is
+        // important so that it has access to PluginService, other than that
+        // instead of qz.ws we might want to provide a Host service which limits
+        // access to the QZ Tray APIs a plugin can use
+        config.put(org.osgi.framework.Constants.FRAMEWORK_SYSTEMPACKAGES_EXTRA,
+            "qz.ws; version=" + Constants.VERSION + ", qz.service; version=" + Constants.VERSION + ", org.slf4j; version=1.0.0");
+
+        // Load bundles from a plugins directory next to the JAR
+        String pluginDir = DeployUtilities.fixWhitespaces(DeployUtilities.getParentDirectory(DeployUtilities.detectJarPath()) + File.separator + "plugins" + File.separator);
+        config.put(AutoProcessor.AUTO_DEPLOY_DIR_PROPERTY, pluginDir);
+
+        // Set the cache directory next to the JAR
+        String cacheDir = DeployUtilities.fixWhitespaces(DeployUtilities.getParentDirectory(DeployUtilities.detectJarPath()) + File.separator + "felix-cache" + File.separator);
+        config.put(org.osgi.framework.Constants.FRAMEWORK_STORAGE, cacheDir);
+
+        // Clean the cache every time Felix is initialized, otherwise it gets stale on rebuilds (wouldn't if you updated the version # in manifest, probably)
+        config.put(org.osgi.framework.Constants.FRAMEWORK_STORAGE_CLEAN, org.osgi.framework.Constants.FRAMEWORK_STORAGE_CLEAN_ONFIRSTINIT);
+
+        // Install any new bundles found, or update them, but always start them
+        config.put(AutoProcessor.AUTO_DEPLOY_ACTION_PROPERTY, "install,update,start");
+
+        BundleContext context = null;
+
         trayProperties = getTrayProperties();
+
+        // TBD - It'd be nice if QZ Tray 'reload' also picked up any new bundles,
+        // so this should probably be moved to work nicely with 'reloadServer'.
+        // Unclear if we'd need to tear down Felix and start it up again, there
+        // is a m_felix.refresh() method but it's not public.
+        try {
+            // Now create an instance of Felix with our config properties
+            m_felix = new Felix(config);
+            m_felix.init();
+            context = m_felix.getBundleContext();
+
+            // Auto processor finds and loads the bundles
+            AutoProcessor.process(config, context);
+
+            // Now start Felix instance.
+            m_felix.start();
+
+            // Get *ALL* services which implement the PluginService interface
+            ServiceReference[] refs = context.getServiceReferences(
+                PluginService.class.getName(), null);
+
+            // Loop through the plugins. We'd probably want to store these in
+            // a list or a map so that we can call them for various things
+            for(ServiceReference ref : refs) {
+                PluginService plugin = (PluginService) context.getService(ref);
+                plugin.initialize(trayProperties);
+            }
+        }
+        catch (Exception ex) {
+            System.err.println("Could not start Felix: " + ex);
+            ex.printStackTrace();
+        }
 
         if (trayProperties != null) {
             keyStorePath = trayProperties.getProperty("wss.keystore");
@@ -124,19 +195,6 @@ public class PrintSocketServer {
 
             if (trayProperties != null) {
                 queueClients = runQueueClients();
-
-                boolean hasLetsEncryptRenewalURL = trayProperties.containsKey("letsencrypt.renewal.url");
-
-                if (hasLetsEncryptRenewalURL) {
-                    String renewalURL = trayProperties.getProperty("letsencrypt.renewal.url");
-                    String renewalCredentials = trayProperties.getProperty("letsencrypt.renewal.credentials");
-                    int renewalBeforeExpirationDays = Integer.parseUnsignedInt(trayProperties.getProperty("letsencrypt.renewal.daysBeforeExpiration", "5"));
-
-                    ScheduledFuture<?> letsEncryptRenewalService = scheduler.scheduleWithFixedDelay(
-                        new LetsEncryptRenewalRunnable(renewalURL, renewalCredentials, renewalBeforeExpirationDays,
-                            keyStorePath, keyStorePassword, keyStoreKeyPassword),
-                        0, 1, TimeUnit.DAYS);
-                }
             }
 
             runServer();
@@ -150,6 +208,14 @@ public class PrintSocketServer {
             for (QueueClient client : queueClients) {
                 client.releaseClaimedQueue();
             }
+        }
+
+        try {
+            m_felix.stop();
+            m_felix.waitForStop(0);
+        } catch (Exception ex)
+        {
+            // TODO
         }
 
         log.warn("The web socket server is no longer running");

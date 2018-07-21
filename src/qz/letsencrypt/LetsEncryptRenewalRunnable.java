@@ -60,6 +60,10 @@ public class LetsEncryptRenewalRunnable implements Runnable {
 
     private boolean firstRun;
 
+    static {
+        java.security.Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
+    }
+
     public LetsEncryptRenewalRunnable(String renewalURL, String renewalCredentials, int renewalDaysBeforeExpiration, String keyStorePath, String keyStorePassword, String keyStoreKeyPassword) {
         this.renewalURL = renewalURL;
         this.renewalCredentials = renewalCredentials;
@@ -83,10 +87,10 @@ public class LetsEncryptRenewalRunnable implements Runnable {
             // XXX - Shitty hack to prevent this from running immediately
             //       on initial start-up and trampling the regular start-up
             //       if the certificate is eligible to be renewed immediately
-            if (this.firstRun) {
-                Thread.sleep(300000);
-                firstRun = false;
-            }
+            // if (this.firstRun) {
+            //     Thread.sleep(300000);
+            //     firstRun = false;
+            // }
 
             fis = new java.io.FileInputStream(keyStorePath);
 
