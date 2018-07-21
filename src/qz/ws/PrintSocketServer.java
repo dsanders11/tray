@@ -169,9 +169,11 @@ public class PrintSocketServer {
 
             // Loop through the plugins. We'd probably want to store these in
             // a list or a map so that we can call them for various things
-            for(ServiceReference ref : refs) {
-                PluginService plugin = (PluginService) context.getService(ref);
-                plugin.initialize(trayProperties);
+            if (refs != null) {
+                for(ServiceReference ref : refs) {
+                    PluginService plugin = (PluginService) context.getService(ref);
+                    plugin.initialize(trayProperties);
+                }
             }
         }
         catch (Exception ex) {
